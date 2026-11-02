@@ -1,15 +1,7 @@
 <?php
-// Deployment test page. Shows which commit is live so you can confirm
-// that a push to GitHub reached the server.
-
-$version = ['commit' => 'unknown', 'deployed_at' => 'unknown'];
-$versionFile = __DIR__ . '/version.json';
-if (is_readable($versionFile)) {
-    $data = json_decode((string) file_get_contents($versionFile), true);
-    if (is_array($data)) {
-        $version = array_merge($version, $data);
-    }
-}
+// Deployment test page. Bump BUILD on each test push and check that the
+// new value shows up on the server.
+const BUILD = 'Test build #1';
 
 function h(string $s): string
 {
@@ -37,10 +29,10 @@ function h(string $s): string
 <body>
   <div class="card">
     <h1>iMasons Data Acquisition</h1>
-    <p class="ok">✓ Deployed automatically from GitHub</p>
+    <p class="ok">✓ Deployed from GitHub via Plesk</p>
     <dl>
-      <dt>Commit</dt>      <dd><?= h(substr((string) $version['commit'], 0, 7)) ?></dd>
-      <dt>Deployed at</dt> <dd><?= h((string) $version['deployed_at']) ?></dd>
+      <dt>Build</dt>       <dd><?= h(BUILD) ?></dd>
+      <dt>Deployed at</dt> <dd><?= h(date('Y-m-d H:i:s T', (int) filemtime(__FILE__))) ?></dd>
       <dt>PHP version</dt> <dd><?= h(PHP_VERSION) ?></dd>
       <dt>Server time</dt> <dd><?= h(date('Y-m-d H:i:s T')) ?></dd>
     </dl>
