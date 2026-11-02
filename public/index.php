@@ -1,7 +1,7 @@
 <?php
 // Deployment test page. Bump BUILD on each test push and check that the
 // new value shows up on the server.
-const BUILD = 'Test build #1';
+const BUILD = 'Test build #2';
 
 function h(string $s): string
 {
