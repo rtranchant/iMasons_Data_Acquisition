@@ -1,7 +1,17 @@
 <?php
 // Deployment test page. Bump BUILD on each test push and check that the
 // new value shows up on the server.
-const BUILD = 'Test build #2';
+const BUILD = 'Test build #3';
+
+require __DIR__ . '/../src/bootstrap.php';
+
+try {
+    $dbStatus = '✓ Connected (MariaDB ' . db()->query('SELECT VERSION()')->fetchColumn() . ')';
+} catch (Throwable $e) {
+    $dbStatus = '✗ ' . ($e instanceof RuntimeException && !$e instanceof PDOException
+        ? $e->getMessage()
+        : 'Connection failed – check host, name, user and password in ~/imasons_config.php');
+}
 
 function h(string $s): string
 {
@@ -34,6 +44,7 @@ function h(string $s): string
       <dt>Build</dt>       <dd><?= h(BUILD) ?></dd>
       <dt>Deployed at</dt> <dd><?= h(date('Y-m-d H:i:s T', (int) filemtime(__FILE__))) ?></dd>
       <dt>PHP version</dt> <dd><?= h(PHP_VERSION) ?></dd>
+      <dt>Database</dt>    <dd><?= h($dbStatus) ?></dd>
       <dt>Server time</dt> <dd><?= h(date('Y-m-d H:i:s T')) ?></dd>
     </dl>
   </div>
