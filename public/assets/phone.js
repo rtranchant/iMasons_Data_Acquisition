@@ -33,7 +33,71 @@
     return i.module + ':' + i.id + ':' + (i.submitted ? 'sent' : 'form');
   }
 
+  // ---- Email banner + pop-up for the session materials (shown on every page while the request is on)
+  var banner = null, modal = null;
+  function updateBanner(state) {
+    var c = state.collateral;
+    var show = c && !c.submitted && !(state.instance && state.instance.id === c.id);
+    if (modal && c) return;                       // keep the pop-up as it is while it is open
+    if (!show) { if (banner) { banner.remove(); banner = null; document.body.classList.remove('has-banner'); } return; }
+    if (banner) { banner._coll = c; return; }
+    banner = el('div', { 'class': 'mail-banner', role: 'region', 'aria-label': 'Session materials' }, [
+      el('span', { text: 'Get the materials from this session by email' }),
+      el('button', { 'class': 'btn lime sm', type: 'button', text: 'Send them to me', on: { click: function () { openModal(banner._coll); } } })
+    ]);
+    banner._coll = c;
+    document.body.appendChild(banner);
+    document.body.classList.add('has-banner');
+  }
+
+  function openModal(c) {
+    var name = el('input', { type: 'text', id: 'm-fn', autocomplete: 'name', required: 'required' });
+    var email = el('input', { type: 'email', id: 'm-em', autocomplete: 'email', inputmode: 'email', required: 'required' });
+    var consent = el('input', { type: 'checkbox', id: 'm-cs', required: 'required' });
+    var err = el('div', { 'class': 'error', role: 'alert', hidden: 'hidden' });
+    var form = el('form', {}, [
+      el('h2', { style: 'margin-top:0', text: 'Session materials' }),
+      el('p', { 'class': 'muted', text: c.intro }),
+      el('label', { 'for': 'm-fn', text: 'Full name' }), name,
+      el('label', { 'for': 'm-em', text: 'Email' }), email,
+      el('label', { 'class': 'check', 'for': 'm-cs' }, [consent, c.consent]),
+      err,
+      el('div', { 'class': 'actions', style: 'margin-top:16px' }, [
+        el('button', { 'class': 'btn lime', type: 'submit', text: 'Submit' }),
+        el('button', { 'class': 'btn light', type: 'button', text: 'Not now', on: { click: closeModal } })
+      ])
+    ]);
+    var box = el('div', { 'class': 'modal-box', role: 'dialog', 'aria-modal': 'true' }, [form]);
+    modal = el('div', { 'class': 'modal', on: { click: function (e) { if (e.target === modal) closeModal(); } } }, [box]);
+    document.body.appendChild(modal);
+    name.focus();
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var btn = form.querySelector('button[type=submit]');
+      btn.disabled = true; err.hidden = true;
+      api('collateral', { name: name.value, email: email.value, consent: consent.checked })
+        .then(function (st) {
+          box.innerHTML = '';
+          box.appendChild(el('div', {}, [
+            el('h2', { style: 'margin-top:0', text: st.notice ? 'Sorry' : 'Thank you!' }),
+            el('p', { 'class': 'lead', text: st.notice || "We'll send you the materials after the session." }),
+            el('button', { 'class': 'btn block', type: 'button', text: 'Close', on: { click: closeModal } })
+          ]));
+          lastState = st;
+        })
+        .catch(function (e2) { err.textContent = e2.message || 'Connection problem – please try again.'; err.hidden = false; btn.disabled = false; });
+    });
+  }
+  function closeModal() {
+    if (modal) { modal.remove(); modal = null; }
+    // Not forced: keeps whatever the attendee was typing in the page behind the pop-up.
+    if (lastState) { render(lastState, false); }
+  }
+
+  var lastState = null;
   function render(state, force) {
+    lastState = state;
+    updateBanner(state);
     var key = keyOf(state);
     if (!force && key === shownKey) return;
     // Keep the current m1 statement until it is answered, even if the server would now pick another.

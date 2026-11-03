@@ -22,4 +22,4 @@ endif;
   <div class="waiting"><div class="pulse"></div><p class="muted">Connecting…</p></div>
 </div>
 <?php
-page_end('<script>window.EVENT_CODE = ' . json_encode($event['code']) . ';</script><script src="assets/phone.js?v=1"></script>');
+page_end('<script>window.EVENT_CODE = ' . json_encode($event['code']) . ';</script><script src="assets/phone.js?v=2"></script>');

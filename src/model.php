@@ -22,6 +22,7 @@ const MODULES = [
     'm3' => [
         'name'   => 'Send me the collateral',
         'short'  => 'Collateral',
+        'event_toggle' => true, // one per event, switched on in the event settings
         'slides' => ['collect' => 'Sign-ups'],
     ],
     'm4' => [
@@ -297,6 +298,41 @@ function move_slide(int $eventId, int $slideId, int $direction): void
             q('UPDATE slides SET position = ? WHERE id = ?', [($i + 1) * 10, $slides[$j]['id']]);
             return;
         }
+    }
+}
+
+// ---------------------------------------------------------------- collateral (one per event)
+
+/** The event's collateral instance when the toggle is on, else null. */
+function collateral_instance(array $event): ?array
+{
+    if (empty($event['collateral_on']) || empty($event['collateral_instance_id'])) {
+        return null;
+    }
+    return instance_by_id((int) $event['collateral_instance_id']);
+}
+
+/**
+ * Switch the collateral request on (adds its page at the end of the run of show)
+ * or off (removes the page; the instance and its sign-ups are kept).
+ */
+function set_collateral(array $event, bool $on): void
+{
+    $eid = (int) $event['id'];
+    $inst = !empty($event['collateral_instance_id']) ? instance_by_id((int) $event['collateral_instance_id']) : null;
+    if ($on) {
+        if (!$inst) {
+            $id = create_instance($eid, 'm3', 'Get the materials');
+            q('UPDATE events SET collateral_instance_id = ? WHERE id = ?', [$id, $eid]);
+        } elseif (!q('SELECT 1 FROM slides WHERE instance_id = ?', [$inst['id']])->fetchColumn()) {
+            insert_slides($eid, null, [['kind' => 'collect', 'instance_id' => (int) $inst['id']]]);
+        }
+        q('UPDATE events SET collateral_on = 1 WHERE id = ?', [$eid]);
+    } else {
+        if ($inst) {
+            q('DELETE FROM slides WHERE instance_id = ?', [$inst['id']]);
+        }
+        q('UPDATE events SET collateral_on = 0 WHERE id = ?', [$eid]);
     }
 }
 

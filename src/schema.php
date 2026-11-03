@@ -141,4 +141,16 @@ return [
         "ALTER TABLE slides ADD COLUMN page_id INT NULL,
             ADD CONSTRAINT fk_slide_page FOREIGN KEY (page_id) REFERENCES deck_pages(id) ON DELETE CASCADE",
     ],
+
+    // One collateral request per event, switched on/off in the event settings.
+    3 => [
+        "ALTER TABLE events ADD COLUMN collateral_on TINYINT(1) NOT NULL DEFAULT 0,
+            ADD COLUMN collateral_instance_id INT NULL,
+            ADD CONSTRAINT fk_event_collateral FOREIGN KEY (collateral_instance_id) REFERENCES instances(id) ON DELETE SET NULL",
+        // Adopt an existing collateral module, if an event already has one.
+        "UPDATE events e SET
+            collateral_instance_id = (SELECT MIN(i.id) FROM instances i WHERE i.event_id = e.id AND i.module = 'm3'),
+            collateral_on = (SELECT COUNT(*) > 0 FROM slides s JOIN instances i ON i.id = s.instance_id
+                             WHERE i.event_id = e.id AND i.module = 'm3')",
+    ],
 ];

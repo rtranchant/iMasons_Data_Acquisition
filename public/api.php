@@ -21,6 +21,7 @@ try {
         case 'phone':
         case 'm1_answer':
         case 'submit':
+        case 'collateral':
             handle_phone($event, $action, $input);
             break;
         case 'screen':
@@ -71,8 +72,23 @@ function handle_phone(array $event, string $action, array $input): void
     $slide = current_slide($event);
     $instance = ($slide && $slide['is_open']) ? instance_by_id($slide['instance_id']) : null;
 
+    $coll = collateral_instance($event);
+    if ($coll && !$coll['is_open']) {
+        $coll = null;
+    }
+
     $notice = null;
-    if ($action !== 'phone') {
+    if ($action === 'collateral') {
+        // From the email banner: works whatever is live, as long as the collateral request is on and open.
+        if (!$coll) {
+            $notice = 'Sign-up for the materials is closed. Thank you!';
+        } else {
+            $err = save_submission($coll, $pid, $input);
+            if ($err !== null) {
+                json_out(['error' => 'validation', 'message' => $err], 422);
+            }
+        }
+    } elseif ($action !== 'phone') {
         $target = (int) ($input['instance_id'] ?? 0);
         if (!$instance || (int) $instance['id'] !== $target) {
             $notice = 'This activity has just closed. Thank you!';
@@ -88,7 +104,15 @@ function handle_phone(array $event, string $action, array $input): void
     }
 
     touch_participant($pid, $instance ? (int) $instance['id'] : null);
-    $out = ['event' => $event['name'], 'notice' => $notice, 'instance' => null];
+    $out = ['event' => $event['name'], 'notice' => $notice, 'instance' => null, 'collateral' => null];
+    if ($coll) {
+        $out['collateral'] = [
+            'id' => (int) $coll['id'],
+            'intro' => $coll['config']['intro'],
+            'consent' => $coll['config']['consent'],
+            'submitted' => (bool) submission_for((int) $coll['id'], $pid),
+        ];
+    }
     if ($instance) {
         $out['instance'] = phone_view($instance, $pid);
     }

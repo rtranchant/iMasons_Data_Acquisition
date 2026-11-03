@@ -83,3 +83,8 @@ body { background: var(--ink); color: var(--white); font-family: "Lexend", ui-sa
 body.fullbleed .stripe, body.fullbleed .top { display: none; }
 body.fullbleed #stage { padding: 0; align-items: center; justify-content: center; }
 .slideimg { width: 100vw; height: 100vh; object-fit: contain; display: block; }
+
+body { cursor: pointer; }
+.hint { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 10; background: #fff; color: var(--ink);
+  padding: 12px 18px; font-size: 16px; border-left: 6px solid var(--amber); max-width: 90vw; cursor: default; }
+.hint a { color: #034F63; font-weight: 600; }

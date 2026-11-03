@@ -19,7 +19,9 @@ appear on the room's big screen, and the host runs everything from a phone remot
    on Yes or No. Otherwise it is flagged *Needs revision*. Rewording a statement restarts its count.
 2. **Text input** – slides: *Live statements*, *Statement wall*. Optional multiple-choice questions.
    Statements appear on screen only after approval on the remote.
-3. **Send me the collateral** – slide: *Sign-ups*. Name, email, consent.
+3. **Send me the collateral** – one per event, switched on/off in the event settings (not in the module list).
+   On: a *Sign-ups* page is added to the run of show, and every attendee page shows an email banner that opens
+   a name/email/consent pop-up. Off: the page is removed; sign-ups collected so far are kept.
 4. **Pledge – get me connected** – slide: *Pledges*. Pledge text, name, email, consent.
 
 ### Uploaded slides
@@ -30,8 +32,9 @@ installing on the server; pages are stored in the database. Choose where the sli
 then drag (☰) to fine-tune. Uploading a revised version of a deck keeps its slides in place.
 Animations and embedded video are not carried over.
 
-On the big screen, slides fill the screen. When the host is logged in on the screen computer, a presenter
-clicker or the arrow keys move through the run of show.
+On the big screen, slides fill the screen. When the host is logged in on the laptop running the screen,
+a click or →/Space/PageDown moves forward and ← /PageUp moves back (presenter clickers work too).
+Hide a slide (e.g. a placeholder) and Next/Previous skip it.
 
 Hiding a *Live participation* slide also hides that module's results slide; Next/Previous skip hidden slides.
 

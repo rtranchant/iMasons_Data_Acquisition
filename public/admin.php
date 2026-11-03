@@ -55,7 +55,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         case 'add_instance':
             $module = (string) ($_POST['module'] ?? '');
             $title = str_limit((string) ($_POST['title'] ?? ''), 200);
-            if (!isset(MODULES[$module])) {
+            if (!isset(MODULES[$module]) || !empty(MODULES[$module]['event_toggle'])) {
                 redirect($back);
             }
             if ($title === '') {
@@ -78,6 +78,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         case 'slide_move':
             move_slide($eventId, (int) $_POST['slide_id'], (int) $_POST['dir'] > 0 ? 1 : -1);
             redirect($back . '#ros');
+
+        case 'toggle_collateral':
+            $event = event_by_id($eventId);
+            if ($event) {
+                $on = !empty($_POST['on']);
+                set_collateral($event, $on);
+                flash($on ? 'Collateral request switched on: its page was added at the end of the run of show and the email banner now shows on phones.'
+                          : 'Collateral request switched off: its page was removed. Sign-ups collected so far are kept.');
+            }
+            redirect($back . '#collateral');
 
         case 'reorder':
             reorder_slides($eventId, array_map('intval', (array) ($_POST['ids'] ?? [])));
@@ -335,7 +345,7 @@ function render_event(int $id, ?string $msg): void
       <div class="grid2">
         <div><label for="module">Module</label>
           <select id="module" name="module">
-            <?php foreach (MODULES as $key => $m): ?><option value="<?= h($key) ?>"><?= h($m['name']) ?></option><?php endforeach; ?>
+            <?php foreach (MODULES as $key => $m): if (!empty($m['event_toggle'])) continue; ?><option value="<?= h($key) ?>"><?= h($m['name']) ?></option><?php endforeach; ?>
           </select></div>
         <div><label for="title">Title (shown on screen and phones)</label>
           <input type="text" id="title" name="title" placeholder="e.g. Where does the industry stand?"></div>
@@ -358,6 +368,7 @@ function render_event(int $id, ?string $msg): void
           <?php if ($s['thumb']): ?><img class="thumb" src="<?= h($s['thumb']) ?>" alt="" loading="lazy"><?php endif; ?>
           <div class="grow"><?= module_badge($s['module']) ?> <b><?= h($s['title']) ?></b> – <?= h($s['label']) ?>
             <?php if ($isLive): ?> <span class="badge green">Live</span><?php endif; ?>
+            <?php if (!$s['visible']): ?> <span class="badge grey">Hidden</span><?php endif; ?>
             <?php if ($s['hidden_by_parent']): ?><br><span class="small">Hidden because its participation slide is hidden</span><?php endif; ?>
           </div>
           <div class="actions">
@@ -413,6 +424,29 @@ function render_event(int $id, ?string $msg): void
       <?php endforeach; ?>
     </div>
     <?php endif; ?>
+
+    <?php $coll = !empty($event['collateral_instance_id']) ? instance_by_id((int) $event['collateral_instance_id']) : null;
+          $collOn = !empty($event['collateral_on']) && $coll; ?>
+    <div class="section" id="collateral">Collateral request</div>
+    <div class="box <?= $collOn ? 'accent' : '' ?>" style="margin-top:16px">
+      <form method="post" class="actions" style="justify-content:space-between">
+        <?= csrf_field() ?><input type="hidden" name="do" value="toggle_collateral"><input type="hidden" name="event_id" value="<?= $id ?>">
+        <input type="hidden" name="on" value="<?= $collOn ? '0' : '1' ?>">
+        <div><b>Send attendees the materials from this session</b><br>
+          <span class="muted small"><?= $collOn
+            ? 'On: a sign-up page is in the run of show, and every phone shows a banner to leave name and email.'
+            : 'Off. Switching it on adds a sign-up page to the run of show and an email banner on every phone.' ?></span></div>
+        <div class="switch" role="group" aria-label="Collateral request">
+          <button type="<?= $collOn ? 'submit' : 'button' ?>" class="<?= $collOn ? '' : 'on' ?>">Off</button>
+          <button type="<?= $collOn ? 'button' : 'submit' ?>" class="<?= $collOn ? 'on' : '' ?>">On</button>
+        </div>
+      </form>
+      <?php if ($coll): $cd = instance_dots($coll); ?>
+        <p class="small" style="margin-bottom:0"><?= $cd['done'] ?> sign-up<?= $cd['done'] == 1 ? '' : 's' ?> ·
+          <a href="admin.php?instance=<?= (int) $coll['id'] ?>">Edit wording</a> ·
+          <a href="admin.php?export=<?= (int) $coll['id'] ?>">Export CSV</a></p>
+      <?php endif; ?>
+    </div>
 
     <div class="section">Event settings</div>
     <div class="grid2" style="margin-top:16px">

@@ -263,19 +263,44 @@
   }
   poll();
 
-  // Presenter clicker / keyboard (only when the host is logged in on this computer).
-  if (window.CSRF) {
-    document.addEventListener('keydown', function (e) {
-      var action = { ArrowRight: 'next', ArrowDown: 'next', PageDown: 'next', ' ': 'next', Enter: 'next',
-                     ArrowLeft: 'prev', ArrowUp: 'prev', PageUp: 'prev', Backspace: 'prev' }[e.key];
-      if (!action) return;
-      e.preventDefault();
-      fetch('api.php?a=' + action + '&c=' + encodeURIComponent(code), {
+  // Laptop control: click or → / ↓ / PageDown / Space = next, ← / ↑ / PageUp = previous.
+  // Works when the host is logged in in this browser; otherwise a hint explains how.
+  var chain = Promise.resolve(), hintTimer;
+  function hint(html) {
+    var h = document.getElementById('hint');
+    if (!h) { h = document.createElement('div'); h.id = 'hint'; h.className = 'hint'; document.body.appendChild(h); }
+    h.innerHTML = html;
+    h.hidden = false;
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(function () { h.hidden = true; }, 5000);
+  }
+  function step(action) {
+    if (!window.CSRF) {
+      hint('To move the slides from this computer, <a href="login.php?next=' +
+        encodeURIComponent(location.pathname + location.search) + '">log in as admin</a> in this browser first.');
+      return;
+    }
+    chain = chain.then(function () {
+      return fetch('api.php?a=' + action + '&c=' + encodeURIComponent(code), {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRF': window.CSRF }, body: '{}'
+      }).then(function (r) {
+        if (r.status === 401) { window.CSRF = null; step(action); }
       });
-    });
+    }).catch(function () { hint('Could not reach the server – try again.'); });
   }
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    var action = { ArrowRight: 'next', ArrowDown: 'next', PageDown: 'next', ' ': 'next', Enter: 'next',
+                   ArrowLeft: 'prev', ArrowUp: 'prev', PageUp: 'prev', Backspace: 'prev' }[e.key];
+    if (!action) return;
+    e.preventDefault();
+    step(action);
+  });
+  document.addEventListener('click', function (e) {
+    if (e.button !== 0 || e.target.closest('#fs, #hint, a, button')) return;
+    step('next');
+  });
 
   // Rebuild on resize so the dots and wall fit the new size.
   var rt;

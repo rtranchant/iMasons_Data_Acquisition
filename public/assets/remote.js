@@ -142,7 +142,7 @@
           ])
         ]),
         el('div', { 'class': 'actions' }, [
-          live ? badge('green', 'Live') : (s.visible ? el('button', { type: 'button', 'class': 'btn sm', text: 'Go live', on: { click: act('goto', { slide_id: s.id }) } }) : null),
+          live ? badge('green', 'Live') : (s.visible ? el('button', { type: 'button', 'class': 'btn sm', text: 'Go live', on: { click: act('goto', { slide_id: s.id }) } }) : badge('grey', 'Hidden')),
           s.hidden_by_parent ? null : el('button', { type: 'button', 'class': 'btn light sm', text: s.hidden ? 'Show' : 'Hide', on: { click: act('hide', { slide_id: s.id, hidden: !s.hidden }) } })
         ])
       ]);
