@@ -3,9 +3,10 @@
 (function () {
   'use strict';
   var code = window.EVENT_CODE;
-  var stage = document.getElementById('stage');
-  var POLL_MS = 1500, ROTATE_MS = 6000, WALL_SWAP_MS = 5000;
-  var layoutKey = null, ui = {}, timers = [];
+  var root = document.getElementById('screen');
+  var POLL_MS = 1500, WALL_SWAP_MS = 6000, ANSWER_MIN_MS = 10000, FADE_MS = 800, LAYER_FADE_MS = 650;
+  var WALL_SIZE = 8;
+  var layoutKey = null, ui = {}, timers = [], stage = null, currentLayer = null;
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -31,28 +32,52 @@
     return add(el('div', 'qrblock'), q, t);
   }
 
+  // ---------------------------------------------------------------- layers (smooth page changes)
+  // Each page is built in a new layer on top of the current one and faded in; the old layer is then removed.
+
+  function newLayer(eventName, withHeader) {
+    var layer = el('div', 'layer');
+    if (withHeader) {
+      add(layer, el('div', 'stripe'), add(el('header', 'top'), el('span', 'brand', 'iMasons'), el('span', 'event', eventName)));
+    }
+    var content = el('main', 'content' + (withHeader ? '' : ' bare'));
+    layer.appendChild(content);
+    root.appendChild(layer);
+    return { layer: layer, content: content };
+  }
+
+  function reveal(L) {
+    var old = currentLayer;
+    currentLayer = L.layer;
+    requestAnimationFrame(function () { requestAnimationFrame(function () { L.layer.classList.add('in'); }); });
+    if (old) setTimeout(function () { if (old.parentNode) old.parentNode.removeChild(old); }, LAYER_FADE_MS + 50);
+  }
+
   // ---------------------------------------------------------------- layouts
 
   function build(state) {
     var s = state.slide;
-    if (s && s.kind === 'image') return buildImage(s);
+    if (s && s.kind === 'image') return buildImage(s, state.event);
     clearTimers();
-    document.body.classList.remove('fullbleed');
-    stage.innerHTML = '';
     ui = {};
+    var L = newLayer(state.event, true);
+    stage = L.content;
     if (!s) {
       add(stage, add(el('div', 'hold'),
         add(el('div'), el('div', 'kicker', 'Welcome'), el('h1', null, state.event), el('p', null, 'Scan the code to join on your phone and keep the page open.')),
         qrBlock(state)));
-      return;
+    } else if (s.kind === 'collect') {
+      if (s.module === 'm2') buildAnswers(state, s); else buildCollect(state, s);
+    } else if (s.kind === 'results') {
+      buildResults(s);
+    } else if (s.kind === 'wall') {
+      buildWall(s);
     }
-    if (s.kind === 'collect') return buildCollect(state, s);
-    if (s.kind === 'results') return buildResults(s);
-    if (s.kind === 'wall') return buildWall(s);
+    reveal(L);
   }
 
-  // Uploaded slide: swap in only once the image is decoded, so there is no black flash.
-  function buildImage(s) {
+  // Uploaded slide: fade in only once the image is decoded, so there is no flash.
+  function buildImage(s, eventName) {
     var key = layoutKey, img = new Image();
     img.className = 'slideimg';
     img.alt = s.title || '';
@@ -61,9 +86,10 @@
       if (layoutKey !== key) return; // moved on meanwhile
       clearTimers();
       ui = {};
-      stage.innerHTML = '';
-      document.body.classList.add('fullbleed');
+      var L = newLayer(eventName, false);
+      stage = L.content;
       stage.appendChild(img);
+      reveal(L);
     });
   }
 
@@ -81,14 +107,23 @@
     ui.dots = el('div', 'dots');
     ui.legend = el('div', 'legend');
     add(live, add(el('div', 'dotsbox'), ui.dots, ui.legend));
-    if (s.module === 'm2') {
-      ui.rq = el('q');
-      add(live, add(el('div', 'rotator'), el('div', 'prompt', s.prompt), ui.rq));
-      ui.rot = { list: [], seen: {}, queue: [], i: -1 };
-      timers.push(setInterval(rotate, ROTATE_MS));
-    }
     add(stage, add(el('div', 'collect'), qrBlock(state), live));
     ui.prevDots = { done: 0, watching: 0 };
+  }
+
+  // Text input, live page: prompt on top, then the approved answers one at a time.
+  function buildAnswers(state, s) {
+    add(stage, el('h1', 'title', s.title));
+    var live = el('div', 'live');
+    ui.closed = el('div', 'closed-tag', 'Closed');
+    ui.answer = el('div', 'answer-text fade');
+    ui.answerEmpty = el('div', 'answer-empty', 'Answers will appear here as they come in.');
+    ui.legend = el('div', 'legend');
+    add(live, ui.closed, el('div', 'prompt-big', s.prompt),
+      add(el('div', 'answer-box'), ui.answerEmpty, ui.answer), ui.legend);
+    add(stage, add(el('div', 'collect'), qrBlock(state), live));
+    ui.rot = { list: [], seen: {}, queue: [], current: null, shownAt: 0, first: true, fading: false };
+    timers.push(setInterval(tickAnswers, 500));
   }
 
   function buildResults(s) {
@@ -105,18 +140,17 @@
     add(stage, wrap, ui.foot);
   }
 
+  // Text input, wall page: 8 answers; one random card at a time is swapped for another answer.
   function buildWall(s) {
-    add(stage, el('div', 'kicker', s.prompt || ''), el('h1', 'title', s.title));
+    add(stage, el('h1', 'title tight', s.title));
+    if (s.prompt) add(stage, el('div', 'subtitle', s.prompt));
     ui.wall = el('div', 'wall');
     add(stage, ui.wall);
-    // Capacity depends on the space left on screen.
-    var w = ui.wall.clientWidth, h = ui.wall.clientHeight;
-    var cols = w > 1500 ? 4 : (w > 900 ? 3 : 2);
-    var rows = Math.max(2, Math.min(5, Math.round(h / 170)));
+    var cols = root.clientWidth >= 900 ? 4 : 2;
     ui.wall.style.setProperty('--cols', cols);
-    ui.wall.style.gridTemplateRows = 'repeat(' + rows + ', minmax(0, 1fr))';
+    ui.wall.style.gridTemplateRows = 'repeat(' + (WALL_SIZE / cols) + ', minmax(0, 1fr))';
     ui.slots = [];
-    for (var i = 0; i < cols * rows; i++) {
+    for (var i = 0; i < WALL_SIZE; i++) {
       var card = el('div', 'card fade'), p = el('p');
       card.appendChild(p);
       ui.wall.appendChild(card);
@@ -132,7 +166,8 @@
     var s = state.slide;
     if (!s || s.kind === 'image') return;
     if (ui.closed) ui.closed.style.display = s.is_open ? 'none' : '';
-    if (s.dots) drawDots(s.dots, s.module);
+    if (s.dots && ui.dots) drawDots(s.dots, s.module);
+    if (s.dots && ui.rot) drawCount(s.dots);
     if (ui.num) ui.num.textContent = String(s.total_answers || 0);
     if (ui.rot) feedRotator(s.statements || []);
     if (ui.cols) drawResults(s);
@@ -162,19 +197,62 @@
     ui.prevDots = { done: d.done, watching: d.watching };
   }
 
-  // Module 2 collect: show one statement at a time, newest unseen first.
-  function feedRotator(list) {
-    var r = ui.rot;
-    r.list = list;
-    list.forEach(function (st) { if (!r.seen[st.id]) { r.seen[st.id] = true; r.queue.push(st); } });
-    if (!ui.rq.textContent && list.length) rotate();
+  function drawCount(d) {
+    var txt = d.done + ' contribution' + (d.done === 1 ? '' : 's') + (d.watching ? ' · ' + d.watching + ' writing now' : '');
+    if (ui.legend.textContent === txt) return;
+    ui.legend.innerHTML = '';
+    var a = el('span'); a.appendChild(el('i')); a.appendChild(document.createTextNode(txt));
+    ui.legend.appendChild(a);
   }
-  function rotate() {
+
+  // Text input, live page: a newly approved answer is shown next, but every answer stays up
+  // for at least ANSWER_MIN_MS; with nothing new, cycle through all answers. Fade out, then in.
+  function feedRotator(list) {
+    var r = ui.rot, ids = {};
+    r.list = list;
+    list.forEach(function (st) { ids[st.id] = true; });
+    if (r.first) {
+      r.first = false;
+      list.forEach(function (st) { r.seen[st.id] = true; });
+      if (list.length) showAnswer(list[list.length - 1]);   // newest first
+      return;
+    }
+    list.forEach(function (st) { if (!r.seen[st.id]) { r.seen[st.id] = true; r.queue.push(st); } });
+    r.queue = r.queue.filter(function (st) { return ids[st.id]; });
+    if (r.current && !ids[r.current.id]) r.shownAt = 0;   // removed by the host: replace it now
+  }
+  function tickAnswers() {
     var r = ui.rot;
-    if (!r || !r.list.length) { if (ui.rq) ui.rq.textContent = ''; return; }
-    var next = r.queue.length ? r.queue.shift() : r.list[(r.i = (r.i + 1) % r.list.length)];
-    ui.rq.classList.add('fade');
-    setTimeout(function () { ui.rq.textContent = next.text; ui.rq.classList.remove('fade'); }, 800);
+    if (!r || r.fading || r.first) return;
+    var ids = {};
+    r.list.forEach(function (st) { ids[st.id] = true; });
+    var currentOk = r.current && ids[r.current.id];
+    if (!r.list.length) { if (r.current) showAnswer(null); return; }
+    if (currentOk && Date.now() - r.shownAt < ANSWER_MIN_MS) return;
+    if (r.queue.length) return showAnswer(r.queue.shift());
+    if (!currentOk) return showAnswer(r.list[0]);
+    if (r.list.length > 1) {
+      var i = r.list.findIndex(function (st) { return st.id === r.current.id; });
+      showAnswer(r.list[(i + 1) % r.list.length]);
+    }
+  }
+  function showAnswer(st) {
+    var r = ui.rot, a = ui.answer;
+    r.fading = true;
+    var delay = r.current ? FADE_MS : 0;
+    a.classList.add('fade');
+    setTimeout(function () {
+      if (ui.answer !== a) return;   // page changed meanwhile
+      r.current = st;
+      r.shownAt = Date.now();
+      r.fading = false;
+      ui.answerEmpty.style.display = st ? 'none' : '';
+      if (!st) { a.textContent = ''; return; }
+      a.textContent = st.text;
+      a.className = 'answer-text fade' + (st.text.length > 140 ? ' long' : st.text.length > 70 ? ' mid' : '');
+      void a.offsetWidth;   // restart the transition
+      a.classList.remove('fade');
+    }, delay);
   }
 
   function drawResults(s) {

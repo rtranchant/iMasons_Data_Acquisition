@@ -91,3 +91,29 @@ body { cursor: pointer; }
 
 /* Keep line breaks in hosts' and attendees' text */
 .pledge, .intro, .rotator q, .rotator .prompt, .kicker, .card p, .item p, .hold p { white-space: pre-line; overflow-wrap: anywhere; }
+
+/* Layers: each page fades in over the previous one */
+#screen { position: fixed; inset: 0; overflow: hidden; background: var(--ink); }
+.layer { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--ink); opacity: 0; transition: opacity .65s ease; }
+.layer.in { opacity: 1; }
+.content { flex: 1; min-height: 0; padding: 3vh 4vw 4vh; display: flex; flex-direction: column; }
+.content.bare { padding: 0; align-items: center; justify-content: center; }
+.offline { position: fixed; top: 12px; right: 16px; z-index: 5; color: var(--amber); font-size: 14px; }
+
+/* Text input, live page */
+.prompt-big { flex: none; font-size: clamp(22px, 2.3vw, 48px); font-weight: 300; line-height: 1.3; color: var(--white);
+  border-left: .5vw solid var(--cyan); padding: .4vh 0 .4vh 1.4vw; white-space: pre-line; overflow-wrap: anywhere; }
+.answer-box { flex: 1; min-height: 0; display: flex; align-items: center; border-top: 1px solid var(--line); padding: 3vh 0 1vh; overflow: hidden; }
+.answer-text { font-size: clamp(30px, 3.9vw, 84px); font-weight: 600; line-height: 1.18; letter-spacing: -.012em;
+  white-space: pre-line; overflow-wrap: anywhere; transition: opacity .8s ease; }
+.answer-text.mid { font-size: clamp(26px, 3vw, 64px); }
+.answer-text.long { font-size: clamp(22px, 2.3vw, 48px); }
+.answer-text::before { content: "\201C"; color: var(--lime); }
+.answer-text::after { content: "\201D"; color: var(--lime); }
+.answer-text:empty::before, .answer-text:empty::after { content: none; }
+.answer-empty { color: var(--muted); font-weight: 300; font-size: clamp(18px, 1.6vw, 32px); }
+
+/* Text input, wall page */
+.title.tight { margin-bottom: 1.2vh; }
+.subtitle { flex: none; font-size: clamp(18px, 1.7vw, 36px); font-weight: 300; color: var(--grey); margin: 0 0 3vh; white-space: pre-line; overflow-wrap: anywhere; }
+.wall .card p { font-size: clamp(18px, 1.75vw, 40px); }

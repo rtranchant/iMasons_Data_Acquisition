@@ -21,19 +21,14 @@ if (!$event) {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/screen.css?v=4">
+  <link rel="stylesheet" href="assets/screen.css?v=5">
 </head>
 <body>
-  <div class="stripe"></div>
-  <header class="top">
-    <span class="brand">iMasons</span>
-    <span class="event" id="event"><?= h($event['name']) ?></span>
-    <span class="offline" id="offline" hidden>Reconnecting…</span>
-  </header>
-  <main id="stage"></main>
+  <div id="screen" aria-live="polite"></div>
+  <div class="offline" id="offline" hidden>Reconnecting…</div>
   <button id="fs" class="fs" type="button" title="Full screen">⛶ Full screen</button>
   <script src="assets/vendor/qrcode.js?v=1"></script>
   <script>window.EVENT_CODE = <?= json_encode($event['code']) ?>;<?php if (is_admin()): ?> window.CSRF = <?= json_encode(csrf_token()) ?>;<?php endif; ?></script>
-  <script src="assets/screen.js?v=3"></script>
+  <script src="assets/screen.js?v=4"></script>
 </body>
 </html>
