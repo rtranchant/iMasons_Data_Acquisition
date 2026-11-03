@@ -1,7 +1,7 @@
 <?php
 // Deployment test page. Bump BUILD on each test push and check that the
 // new value shows up on the server.
-const BUILD = 'Test build #3';
+const BUILD = 'Test build #4';
 
 require __DIR__ . '/../src/bootstrap.php';
 
@@ -10,7 +10,7 @@ try {
 } catch (Throwable $e) {
     $dbStatus = '✗ ' . ($e instanceof RuntimeException && !$e instanceof PDOException
         ? $e->getMessage()
-        : 'Connection failed – check host, name, user and password in ~/imasons_config.php');
+        : 'Connection failed – check host, name, user and password in imasons_config.php');
 }
 
 function h(string $s): string
