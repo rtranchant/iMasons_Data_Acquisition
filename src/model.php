@@ -224,6 +224,25 @@ function next_visible_slide(array $event, array $slides): ?array
     return null;
 }
 
+/** Images of the next two and previous visible slides, so the screen has them ready. */
+function neighbour_images(array $event, array $slides): array
+{
+    $visible = array_values(array_filter($slides, function ($s) { return $s['visible']; }));
+    $at = null;
+    foreach ($visible as $i => $s) {
+        if ($s['id'] === (int) ($event['current_slide_id'] ?? 0)) {
+            $at = $i;
+        }
+    }
+    $out = [];
+    foreach ($at === null ? [0, 1] : [$at + 1, $at + 2, $at - 1] as $i) {
+        if (isset($visible[$i]) && $visible[$i]['image']) {
+            $out[] = $visible[$i]['image'];
+        }
+    }
+    return $out;
+}
+
 /** Rewrite slide positions to match the given order of slide ids (unknown ids are ignored). */
 function reorder_slides(int $eventId, array $orderedIds): void
 {
@@ -429,9 +448,34 @@ function participant_for(array $event, ?string $token): array
     return q('SELECT * FROM participants WHERE id = ?', [db()->lastInsertId()])->fetch();
 }
 
-function touch_participant(int $participantId, ?int $instanceId): void
+/** Record that a phone is here. Skips the write when nothing changed in the last few seconds. */
+function touch_participant(array $p, ?int $instanceId): void
 {
-    q('UPDATE participants SET last_seen = UTC_TIMESTAMP(), seen_instance_id = ? WHERE id = ?', [$instanceId, $participantId]);
+    $fresh = isset($p['last_seen']) && (time() - strtotime($p['last_seen'] . ' UTC')) < 8;
+    if ($fresh && (int) ($p['seen_instance_id'] ?? 0) === (int) $instanceId) {
+        return;
+    }
+    q('UPDATE participants SET last_seen = UTC_TIMESTAMP(), seen_instance_id = ? WHERE id = ?', [$instanceId, (int) $p['id']]);
+}
+
+/**
+ * The live slide with its instance, in one query (for the phones, which ask most often).
+ * Returns null when nothing is live or the live slide is hidden.
+ */
+function live_slide_with_instance(array $event): ?array
+{
+    if (empty($event['current_slide_id'])) {
+        return null;
+    }
+    $r = q("SELECT s.id AS slide_id, s.kind, s.hidden, i.*,
+                   (SELECT c.hidden FROM slides c WHERE c.instance_id = s.instance_id AND c.kind = 'collect' LIMIT 1) AS parent_hidden
+            FROM slides s LEFT JOIN instances i ON i.id = s.instance_id
+            WHERE s.id = ? AND s.event_id = ?", [$event['current_slide_id'], $event['id']])->fetch();
+    if (!$r || $r['hidden'] || ($r['kind'] !== 'collect' && $r['parent_hidden']) || $r['id'] === null) {
+        return null;
+    }
+    unset($r['slide_id'], $r['kind'], $r['hidden'], $r['parent_hidden']);
+    return decode_instance($r);
 }
 
 /**
@@ -453,6 +497,34 @@ function instance_dots(array $instance): array
     $contributors = array_map('intval', $contributors);
     $watching = array_diff(array_map('intval', $online), $contributors);
     return ['done' => count($contributors), 'watching' => count($watching)];
+}
+
+/** instance_dots() for every instance of an event at once (2 queries instead of 2 per instance). */
+function event_dots(int $eventId): array
+{
+    $out = [];
+    $done = q('SELECT s.instance_id AS iid, COUNT(DISTINCT a.participant_id) AS n
+               FROM m1_answers a JOIN m1_statements s ON s.id = a.statement_id JOIN instances i ON i.id = s.instance_id
+               WHERE i.event_id = ? GROUP BY s.instance_id
+               UNION ALL
+               SELECT su.instance_id, COUNT(*) FROM submissions su JOIN instances i ON i.id = su.instance_id
+               WHERE i.event_id = ? GROUP BY su.instance_id', [$eventId, $eventId])->fetchAll();
+    foreach ($done as $r) {
+        $out[(int) $r['iid']] = ['done' => (int) $r['n'], 'watching' => 0];
+    }
+    $watching = q("SELECT p.seen_instance_id AS iid, COUNT(*) AS n
+                   FROM participants p JOIN instances i ON i.id = p.seen_instance_id
+                   WHERE p.event_id = ? AND p.last_seen >= UTC_TIMESTAMP() - INTERVAL ? SECOND
+                     AND NOT (
+                       (i.module = 'm1' AND EXISTS (SELECT 1 FROM m1_answers a JOIN m1_statements s ON s.id = a.statement_id
+                                                    WHERE s.instance_id = i.id AND a.participant_id = p.id))
+                       OR (i.module <> 'm1' AND EXISTS (SELECT 1 FROM submissions su WHERE su.instance_id = i.id AND su.participant_id = p.id)))
+                   GROUP BY p.seen_instance_id", [$eventId, ONLINE_WINDOW])->fetchAll();
+    foreach ($watching as $r) {
+        $iid = (int) $r['iid'];
+        $out[$iid] = ['done' => $out[$iid]['done'] ?? 0, 'watching' => (int) $r['n']];
+    }
+    return $out;
 }
 
 function online_count(int $eventId): int
@@ -504,24 +576,31 @@ function m1_stats(array $instance): array
 }
 
 /**
- * Next statement for an attendee: one they haven't answered (current version),
- * not yet decided Yes/No, preferring statements with the fewest answers.
+ * Next statement for an attendee, in random order: one they haven't answered (current version) and that
+ * is not yet decided Yes/No. Statements that still need answers come before ones flagged for revision.
+ * Returns [statement or null, number of answers this attendee has given].
  */
-function m1_next_statement(array $instance, int $participantId): ?array
+function m1_next_statement(array $instance, int $participantId): array
 {
-    $answered = array_flip(array_map(function ($r) { return $r['statement_id'] . ':' . $r['version']; },
-        q('SELECT a.statement_id, a.version FROM m1_answers a JOIN m1_statements s ON s.id = a.statement_id
-           WHERE s.instance_id = ? AND a.participant_id = ?', [$instance['id'], $participantId])->fetchAll()));
-    $best = null;
+    $rows = q('SELECT a.statement_id, a.version FROM m1_answers a JOIN m1_statements s ON s.id = a.statement_id
+               WHERE s.instance_id = ? AND a.participant_id = ?', [$instance['id'], $participantId])->fetchAll();
+    $answered = [];
+    foreach ($rows as $r) {
+        $answered[$r['statement_id'] . ':' . $r['version']] = true;
+    }
+    $open = $revise = [];
     foreach (m1_stats($instance) as $s) {
-        if ($s['status'] === 'yes' || $s['status'] === 'no' || isset($answered[$s['id'] . ':' . $s['version']])) {
+        if (isset($answered[$s['id'] . ':' . $s['version']])) {
             continue;
         }
-        if ($best === null || $s['n'] < $best['n']) {
-            $best = $s;
+        if ($s['status'] === 'open') {
+            $open[] = $s;
+        } elseif ($s['status'] === 'revise') {
+            $revise[] = $s;
         }
     }
-    return $best;
+    $pool = $open ?: $revise;
+    return [$pool ? $pool[random_int(0, count($pool) - 1)] : null, count($rows)];
 }
 
 function m1_save_answer(array $instance, int $participantId, int $statementId, int $version, string $answer): void

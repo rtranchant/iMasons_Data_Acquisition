@@ -12,10 +12,10 @@ function page_start(string $title, string $bodyClass = '', string $heading = '')
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex">
   <title><?= h($title) ?></title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/app.css?v=4">
+  <link rel="preload" href="assets/fonts/lexend-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/lexend-600.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/fonts/lexend.css?v=1">
+  <link rel="stylesheet" href="assets/app.css?v=5">
 </head>
 <body class="<?= h($bodyClass) ?>">
 <div class="stripe"></div>

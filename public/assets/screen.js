@@ -333,7 +333,9 @@
         var key = state.slide ? state.slide.id + ':' + state.slide.kind : 'hold';
         if (key !== layoutKey) { layoutKey = key; build(state); }
         update(state);
-        if (state.preload && !preloaded[state.preload]) { var im = new Image(); im.src = state.preload; preloaded[state.preload] = im; }
+        (state.preload || []).forEach(function (src) {
+          if (!preloaded[src]) { var im = new Image(); im.src = src; if (im.decode) im.decode().catch(function () {}); preloaded[src] = im; }
+        });
       })
       .catch(function () { offline.hidden = false; failed = true; })
       // The server holds the request while nothing changes, so poll again straight away (back off on errors).
@@ -359,7 +361,7 @@
       return;
     }
     chain = chain.then(function () {
-      return fetch('api.php?a=' + action + '&c=' + encodeURIComponent(code), {
+      return fetch('api.php?a=' + action + '&lite=1&c=' + encodeURIComponent(code), {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRF': window.CSRF }, body: '{}'
       }).then(function (r) {

@@ -18,10 +18,10 @@ if (!$event) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
   <title><?= h($event['name']) ?> – Screen</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/screen.css?v=5">
+  <link rel="preload" href="assets/fonts/lexend-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/lexend-600.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/fonts/lexend.css?v=1">
+  <link rel="stylesheet" href="assets/screen.css?v=6">
 </head>
 <body>
   <div id="screen" aria-live="polite"></div>
@@ -29,6 +29,6 @@ if (!$event) {
   <button id="fs" class="fs" type="button" title="Full screen">⛶ Full screen</button>
   <script src="assets/vendor/qrcode.js?v=1"></script>
   <script>window.EVENT_CODE = <?= json_encode($event['code']) ?>;<?php if (is_admin()): ?> window.CSRF = <?= json_encode(csrf_token()) ?>;<?php endif; ?></script>
-  <script src="assets/screen.js?v=4"></script>
+  <script src="assets/screen.js?v=5"></script>
 </body>
 </html>

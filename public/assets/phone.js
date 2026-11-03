@@ -5,7 +5,7 @@
   var app = document.getElementById('app');
   var shownKey = null;       // what is on screen now, to avoid re-rendering while typing
   var busy = false;
-  var POLL_MS = 2500;
+  var POLL_MS = 1500;   // requests are light now; phones follow the screen within ~1.5 s
 
   function el(tag, attrs, children) {
     var n = document.createElement(tag);

@@ -3,7 +3,20 @@
   'use strict';
   var TARGET_W = 1920, MAX_H = 1440, THUMB_W = 320, MAX_BYTES = 1.8 * 1024 * 1024;
 
-  if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'assets/vendor/pdf.worker.min.js';
+  // pdf.js (1.5 MB) is only loaded when a PDF is actually uploaded.
+  var pdfReady = null;
+  function loadPdfJs() {
+    if (!pdfReady) {
+      pdfReady = new Promise(function (resolve, reject) {
+        var sc = document.createElement('script');
+        sc.src = 'assets/vendor/pdf.min.js';
+        sc.onload = function () { pdfjsLib.GlobalWorkerOptions.workerSrc = 'assets/vendor/pdf.worker.min.js'; resolve(window.pdfjsLib); };
+        sc.onerror = function () { pdfReady = null; reject(new Error('Could not load the PDF reader – check the connection.')); };
+        document.head.appendChild(sc);
+      });
+    }
+    return pdfReady;
+  }
 
   function post(url, body, isForm) {
     var opts = { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF': window.CSRF } };
@@ -49,7 +62,7 @@
     var pdf = files.filter(function (f) { return f.type === 'application/pdf' || /\.pdf$/i.test(f.name); });
     if (pdf.length) {
       if (files.length > 1) return Promise.reject(new Error('Upload one PDF at a time.'));
-      return pdf[0].arrayBuffer().then(function (buf) { return pdfjsLib.getDocument({ data: buf }).promise; }).then(function (doc) {
+      return Promise.all([pdf[0].arrayBuffer(), loadPdfJs()]).then(function (r) { return pdfjsLib.getDocument({ data: r[0] }).promise; }).then(function (doc) {
         return {
           count: doc.numPages,
           render: function (i) {

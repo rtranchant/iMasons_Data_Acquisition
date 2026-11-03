@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var code = window.EVENT_CODE, app = document.getElementById('app'), errBox = document.getElementById('err');
-  var POLL_MS = 2000, lastSig = '', busy = false;
+  var POLL_MS = 1500, busy = false;
   var MOD = { m1: 'Statements', m2: 'Text input', m3: 'Collateral', m4: 'Pledge', deck: 'Slides' };
   var STATUS = { open: ['grey', 'Collecting'], yes: ['green', 'Yes'], no: ['red', 'No'], revise: ['purple', 'Needs revision'] };
 
@@ -27,46 +27,59 @@
   }
 
   function act(action, body) {
-    return function () {
+    return function (e) {
       if (busy) return;
       busy = true;
-      call(action, body || {}).then(function (st) { errBox.hidden = true; render(st, true); })
-        .catch(function (e) { if (e.message !== 'login') { errBox.textContent = 'Could not reach the server – try again.'; errBox.hidden = false; } })
-        .then(function () { busy = false; });
+      var btn = e && e.currentTarget;
+      if (btn && btn.classList) btn.classList.add('pending');   // instant feedback while the server answers
+      call(action, body || {}).then(function (st) { errBox.hidden = true; render(st, false); })
+        .catch(function (e2) { if (e2.message !== 'login') { errBox.textContent = 'Could not reach the server – try again.'; errBox.hidden = false; } })
+        .then(function () { busy = false; if (btn && btn.classList) btn.classList.remove('pending'); });
     };
   }
 
   function badge(cls, text) { return el('span', { 'class': 'badge ' + cls, text: text }); }
 
-  var lastState = null;
+
+  // The page is split into sections; each is redrawn only when its own data changes, so the
+  // run-of-show thumbnails are not rebuilt every time a number moves.
+  var lastState = null, secs = null;
+  function part(name, data, build) {
+    var sec = secs[name], sig = JSON.stringify(data);
+    if (sig === sec.sig) return;
+    sec.sig = sig;
+    sec.el.innerHTML = '';
+    build(sec.el);
+  }
+
   function render(st, force) {
     lastState = st;
-    var sig = JSON.stringify(st);
-    if (!force && sig === lastSig) return;
-    lastSig = sig;
-    app.innerHTML = '';
-    var cur = null;
-    st.slides.forEach(function (s) { if (s.id === st.current_slide_id) cur = s; });
-    var inst = null;
+    if (!secs) {
+      app.innerHTML = '';
+      secs = {};
+      ['now', 'kpis', 'approve', 'stats', 'ros'].forEach(function (n) { secs[n] = { el: el('div'), sig: null }; app.appendChild(secs[n].el); });
+    }
+    if (force) Object.keys(secs).forEach(function (n) { secs[n].sig = null; });
+    var cur = null, nxt = null, inst = null;
+    st.slides.forEach(function (s) { if (s.id === st.current_slide_id) cur = s; if (s.id === st.next_slide_id) nxt = s; });
     if (cur) st.instances.forEach(function (i) { if (i.id === cur.instance_id) inst = i; });
 
-    var nxt = null;
-    st.slides.forEach(function (s) { if (s.id === st.next_slide_id) nxt = s; });
-
     // Now on screen, and what comes next
-    app.appendChild(el('div', { 'class': 'now' }, [
-      el('div', { 'class': 'label', text: 'On screen now' }),
-      cur && cur.thumb ? el('img', { 'class': 'now-thumb', src: cur.thumb, alt: '' }) : null,
-      el('div', { 'class': 'title', text: cur ? cur.title : 'Welcome screen' }),
-      el('div', { 'class': 'small', style: 'color:#ABABAB', text: cur ? MOD[cur.module] + ' · ' + cur.label : 'Event name and QR code' })
-    ]));
-    app.appendChild(el('div', { 'class': 'nextup' }, [
-      el('span', { 'class': 'label', text: 'Next' }),
-      nxt && nxt.thumb ? el('img', { 'class': 'thumb', src: nxt.thumb, alt: '' }) : null,
-      el('span', { 'class': 'small', text: nxt ? nxt.title + ' – ' + nxt.label : 'End of the run of show' })
-    ]));
+    part('now', [cur, nxt], function (box) {
+      box.appendChild(el('div', { 'class': 'now' }, [
+        el('div', { 'class': 'label', text: 'On screen now' }),
+        cur && cur.thumb ? el('img', { 'class': 'now-thumb', src: cur.thumb, alt: '' }) : null,
+        el('div', { 'class': 'title', text: cur ? cur.title : 'Welcome screen' }),
+        el('div', { 'class': 'small', style: 'color:#ABABAB', text: cur ? MOD[cur.module] + ' · ' + cur.label : 'Event name and QR code' })
+      ]));
+      box.appendChild(el('div', { 'class': 'nextup' }, [
+        el('span', { 'class': 'label', text: 'Next' }),
+        nxt && nxt.thumb ? el('img', { 'class': 'thumb', src: nxt.thumb, alt: '' }) : null,
+        el('span', { 'class': 'small', text: nxt ? nxt.title + ' – ' + nxt.label : 'End of the run of show' })
+      ]));
+    });
 
-    // Key numbers
+    // Key numbers and open/closed
     var k = [['In the room', st.online]];
     if (inst) {
       k.push([inst.module === 'm1' ? 'Answering' : 'Responded', inst.dots.done]);
@@ -74,84 +87,92 @@
       else if (inst.module === 'm2') k.push(['To approve', inst.pending.length]);
       else k.push(['Watching', inst.dots.watching]);
     }
-    app.appendChild(el('div', { 'class': 'kpis', style: 'grid-template-columns:repeat(' + k.length + ',1fr)' },
-      k.map(function (x) { return el('div', { 'class': 'kpi' }, [el('b', { text: String(x[1]) }), el('span', { 'class': 'small muted', text: x[0] })]); })));
-
-    if (inst) {
-      app.appendChild(el('div', { 'class': 'actions', style: 'margin:8px 0 4px' }, [
-        el('span', { 'class': 'small', text: 'Phones can respond:' }),
-        el('div', { 'class': 'switch' }, [
-          el('button', { type: 'button', 'class': inst.is_open ? 'on' : '', text: 'Open', on: { click: act('open', { instance_id: inst.id, open: true }) } }),
-          el('button', { type: 'button', 'class': inst.is_open ? '' : 'on', text: 'Closed', on: { click: act('open', { instance_id: inst.id, open: false }) } })
-        ])
-      ]));
-    }
-
-    // Approval queues for every text-input module
-    st.instances.filter(function (i) { return i.module === 'm2'; }).forEach(function (i) {
-      app.appendChild(el('div', { 'class': 'section', text: 'Approve: ' + i.title + ' (' + i.pending.length + ' waiting)' }));
-      if (!i.pending.length) app.appendChild(el('p', { 'class': 'muted small', text: 'Nothing waiting.' }));
-      i.pending.forEach(function (p) {
-        app.appendChild(el('div', { 'class': 'mod' }, [
-          el('p', { 'class': 'txt', text: p.body }),
-          el('div', { 'class': 'actions' }, [
-            el('button', { type: 'button', 'class': 'btn sm', text: 'Approve', on: { click: act('moderate', { submission_id: +p.id, status: 'approved' }) } }),
-            el('button', { type: 'button', 'class': 'btn danger sm', text: 'Reject', on: { click: act('moderate', { submission_id: +p.id, status: 'hidden' }) } })
+    part('kpis', [k, inst && inst.id, inst && inst.is_open], function (box) {
+      box.appendChild(el('div', { 'class': 'kpis', style: 'grid-template-columns:repeat(' + k.length + ',1fr)' },
+        k.map(function (x) { return el('div', { 'class': 'kpi' }, [el('b', { text: String(x[1]) }), el('span', { 'class': 'small muted', text: x[0] })]); })));
+      if (inst) {
+        box.appendChild(el('div', { 'class': 'actions', style: 'margin:8px 0 4px' }, [
+          el('span', { 'class': 'small', text: 'Phones can respond:' }),
+          el('div', { 'class': 'switch' }, [
+            el('button', { type: 'button', 'class': inst.is_open ? 'on' : '', text: 'Open', on: { click: act('open', { instance_id: inst.id, open: true }) } }),
+            el('button', { type: 'button', 'class': inst.is_open ? '' : 'on', text: 'Closed', on: { click: act('open', { instance_id: inst.id, open: false }) } })
           ])
         ]));
-      });
-      if (i.approved.length) {
-        var d = el('details', {}, [el('summary', { text: 'On screen (' + i.approved.length + ')' })]);
-        i.approved.forEach(function (p) {
-          d.appendChild(el('div', { 'class': 'mod' }, [el('p', { 'class': 'txt', text: p.body }),
-            el('button', { type: 'button', 'class': 'btn danger sm', text: 'Remove from screen', on: { click: act('moderate', { submission_id: +p.id, status: 'hidden' }) } })]));
-        });
-        app.appendChild(d);
       }
     });
 
+    // Approval queues for every text-input module
+    var m2s = st.instances.filter(function (i) { return i.module === 'm2'; });
+    part('approve', m2s.map(function (i) { return [i.id, i.title, i.pending, i.approved]; }), function (box) {
+      m2s.forEach(function (i) {
+        box.appendChild(el('div', { 'class': 'section', text: 'Approve: ' + i.title + ' (' + i.pending.length + ' waiting)' }));
+        if (!i.pending.length) box.appendChild(el('p', { 'class': 'muted small', text: 'Nothing waiting.' }));
+        i.pending.forEach(function (p) {
+          box.appendChild(el('div', { 'class': 'mod' }, [
+            el('p', { 'class': 'txt', text: p.body }),
+            el('div', { 'class': 'actions' }, [
+              el('button', { type: 'button', 'class': 'btn sm', text: 'Approve', on: { click: act('moderate', { submission_id: +p.id, status: 'approved' }) } }),
+              el('button', { type: 'button', 'class': 'btn danger sm', text: 'Reject', on: { click: act('moderate', { submission_id: +p.id, status: 'hidden' }) } })
+            ])
+          ]));
+        });
+        if (i.approved.length) {
+          var d = el('details', {}, [el('summary', { text: 'On screen (' + i.approved.length + ')' })]);
+          i.approved.forEach(function (p) {
+            d.appendChild(el('div', { 'class': 'mod' }, [el('p', { 'class': 'txt', text: p.body }),
+              el('button', { type: 'button', 'class': 'btn danger sm', text: 'Remove from screen', on: { click: act('moderate', { submission_id: +p.id, status: 'hidden' }) } })]));
+          });
+          box.appendChild(d);
+        }
+      });
+    });
+
     // Statement results for the live module 1
-    if (inst && inst.module === 'm1') {
-      app.appendChild(el('div', { 'class': 'section', text: 'Statements' }));
+    part('stats', inst && inst.module === 'm1' ? inst.statements : null, function (box) {
+      if (!(inst && inst.module === 'm1')) return;
+      box.appendChild(el('div', { 'class': 'section', text: 'Statements' }));
       inst.statements.forEach(function (s) {
         var n = s.yes + s.no + s.dk || 1;
         var bar = el('div', { 'class': 'bar' }, [['y', s.yes], ['n', s.no], ['d', s.dk]].map(function (p) { return el('i', { 'class': p[0], style: 'width:' + (100 * p[1] / n) + '%' }); }));
-        app.appendChild(el('div', { 'class': 'mod' }, [
+        box.appendChild(el('div', { 'class': 'mod' }, [
           el('div', { 'class': 'small' }, [badge(STATUS[s.status][0], STATUS[s.status][1]), ' Yes ' + s.yes + ' · No ' + s.no + " · Don't know " + s.dk]),
           bar, el('div', { 'class': 'small txt', text: s.text })
         ]));
       });
-    }
-
-    // Run of show
-    app.appendChild(el('div', { 'class': 'section', text: 'Run of show' }));
-    var list = el('div', { 'class': 'list' });
-    list.appendChild(el('div', { 'class': 'row' + (cur ? '' : ' is-live') }, [
-      el('div', { 'class': 'grow' }, [el('b', { text: 'Welcome screen' })]),
-      cur ? el('button', { type: 'button', 'class': 'btn light sm', text: 'Show', on: { click: act('blank') } }) : badge('green', 'Live')
-    ]));
-    st.slides.forEach(function (s, idx) {
-      var live = cur && cur.id === s.id;
-      var instOf = st.instances.filter(function (i) { return i.id === s.instance_id; })[0];
-      var row = el('div', { 'class': 'row' + (s.visible ? '' : ' is-hidden') + (live ? ' is-live' : '') }, [
-        el('span', { 'class': 'label', style: 'width:20px', text: String(idx + 1) }),
-        s.thumb ? el('img', { 'class': 'thumb', src: s.thumb, alt: '', loading: 'lazy' }) : null,
-        el('div', { 'class': 'grow' }, [
-          el('b', { text: s.title }), ' – ' + s.label, el('br'),
-          el('span', { 'class': 'small' }, [
-            s.kind === 'collect' ? (instOf.is_open ? 'Open' : 'Closed') + ' · ' + instOf.dots.done + ' responded' : '',
-            s.hidden_by_parent ? 'Hidden with its participation slide' : ''
-          ])
-        ]),
-        el('div', { 'class': 'actions' }, [
-          live ? badge('green', 'Live') : (s.visible ? el('button', { type: 'button', 'class': 'btn sm', text: 'Go live', on: { click: act('goto', { slide_id: s.id }) } }) : badge('grey', 'Hidden')),
-          s.hidden_by_parent ? null : el('button', { type: 'button', 'class': 'btn light sm', text: s.hidden ? 'Show' : 'Hide', on: { click: act('hide', { slide_id: s.id, hidden: !s.hidden }) } })
-        ])
-      ]);
-      list.appendChild(row);
     });
-    app.appendChild(list);
+
+    // Run of show (only redrawn when slides, the live slide or open/closed change)
+    var openById = {};
+    st.instances.forEach(function (i) { openById[i.id] = i.is_open; });
+    part('ros', [st.slides, cur && cur.id, openById], function (box) {
+      box.appendChild(el('div', { 'class': 'section', text: 'Run of show' }));
+      var list = el('div', { 'class': 'list' });
+      list.appendChild(el('div', { 'class': 'row' + (cur ? '' : ' is-live') }, [
+        el('div', { 'class': 'grow' }, [el('b', { text: 'Welcome screen' })]),
+        cur ? el('button', { type: 'button', 'class': 'btn light sm', text: 'Show', on: { click: act('blank') } }) : badge('green', 'Live')
+      ]));
+      st.slides.forEach(function (s, idx) {
+        var live = cur && cur.id === s.id;
+        list.appendChild(el('div', { 'class': 'row' + (s.visible ? '' : ' is-hidden') + (live ? ' is-live' : '') }, [
+          el('span', { 'class': 'label', style: 'width:20px', text: String(idx + 1) }),
+          s.thumb ? el('img', { 'class': 'thumb', src: s.thumb, alt: '', loading: 'lazy' }) : null,
+          el('div', { 'class': 'grow' }, [
+            el('b', { text: s.title }), ' – ' + s.label, el('br'),
+            el('span', { 'class': 'small' }, [
+              s.kind === 'collect' ? (openById[s.instance_id] ? 'Open' : 'Closed') : '',
+              s.hidden_by_parent ? 'Hidden with its participation slide' : ''
+            ])
+          ]),
+          el('div', { 'class': 'actions' }, [
+            live ? badge('green', 'Live') : (s.visible ? el('button', { type: 'button', 'class': 'btn sm', text: 'Go live', on: { click: act('goto', { slide_id: s.id }) } }) : badge('grey', 'Hidden')),
+            s.hidden_by_parent ? null : el('button', { type: 'button', 'class': 'btn light sm', text: s.hidden ? 'Show' : 'Hide', on: { click: act('hide', { slide_id: s.id, hidden: !s.hidden }) } })
+          ])
+        ]));
+      });
+      box.appendChild(list);
+    });
   }
+
 
   // Go to page N (the numbers shown in the run of show).
   document.getElementById('goto').addEventListener('submit', function (e) {
@@ -164,7 +185,7 @@
     errBox.hidden = true;
     input.value = '';
     input.blur();
-    act('goto', { slide_id: s.id })();
+    act('goto', { slide_id: s.id })(e);
   });
 
   document.getElementById('next').addEventListener('click', act('next'));

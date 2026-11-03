@@ -25,17 +25,14 @@ try {
             handle_phone($event, $action, $input);
             break;
         case 'screen':
-            // Short long-poll: when the screen says which slide it shows, hold the request (max ~2 s)
-            // until the slide changes, so a click on the remote shows up within a quarter second.
+            // Short long-poll: when the screen says which slide it shows, hold the request (max ~1.5 s)
+            // until the slide changes, so a click shows up on screen almost at once.
             if (isset($_GET['wait'])) {
                 $wait = (int) $_GET['wait'];
-                for ($i = 0; $i < 8; $i++) {
-                    if ((int) q('SELECT COALESCE(current_slide_id, 0) FROM events WHERE id = ?', [$event['id']])->fetchColumn() !== $wait) {
-                        break;
-                    }
-                    usleep(250000);
+                for ($i = 0; $i < 12 && (int) ($event['current_slide_id'] ?? 0) === $wait; $i++) {
+                    usleep(120000);
+                    $event = event_by_id((int) $event['id']);
                 }
-                $event = event_by_id((int) $event['id']);
             }
             json_out(screen_state($event));
             break;
@@ -45,7 +42,14 @@ try {
                 if (!hash_equals(csrf_token(), (string) ($_SERVER['HTTP_X_CSRF'] ?? ''))) {
                     json_out(['error' => 'bad_csrf'], 400);
                 }
+            }
+            // Release the session lock right away so the host's other requests never queue behind this one.
+            session_write_close();
+            if ($isPost) {
                 remote_action($event, $action, $input);
+                if (!empty($_GET['lite'])) {
+                    json_out(['ok' => true]); // laptop keys/clicks: the screen picks the change up itself
+                }
                 $event = event_by_id((int) $event['id']);
             }
             json_out(remote_state($event));
@@ -69,8 +73,10 @@ function handle_phone(array $event, string $action, array $input): void
     }
     $pid = (int) $p['id'];
 
-    $slide = current_slide($event);
-    $instance = ($slide && $slide['is_open']) ? instance_by_id($slide['instance_id']) : null;
+    $instance = live_slide_with_instance($event);
+    if ($instance && !$instance['is_open']) {
+        $instance = null;
+    }
 
     $collAll = collateral_instance($event);
     $coll = ($collAll && $collAll['is_open']) ? $collAll : null; // accepting sign-ups
@@ -101,7 +107,7 @@ function handle_phone(array $event, string $action, array $input): void
         }
     }
 
-    touch_participant($pid, $instance ? (int) $instance['id'] : null);
+    touch_participant($p, $instance ? (int) $instance['id'] : null);
     $out = ['event' => $event['name'], 'notice' => $notice, 'instance' => null, 'collateral' => null];
     if ($collAll) {
         $signedUp = (bool) submission_for((int) $collAll['id'], $pid);
@@ -126,10 +132,9 @@ function phone_view(array $inst, int $pid): array
     $cfg = $inst['config'];
     $v = ['id' => (int) $inst['id'], 'module' => $inst['module'], 'title' => $inst['title']];
     if ($inst['module'] === 'm1') {
-        $next = m1_next_statement($inst, $pid);
+        [$next, $answeredCount] = m1_next_statement($inst, $pid);
         $v['intro'] = $cfg['intro'];
-        $v['answered'] = (int) q('SELECT COUNT(*) FROM m1_answers a JOIN m1_statements s ON s.id = a.statement_id
-                                  WHERE s.instance_id = ? AND a.participant_id = ?', [$inst['id'], $pid])->fetchColumn();
+        $v['answered'] = $answeredCount;
         $v['statement'] = $next ? ['id' => $next['id'], 'version' => $next['version'], 'text' => $next['text']] : null;
         return $v;
     }
@@ -207,7 +212,7 @@ function screen_state(array $event): array
         'join_url' => app_url('e.php?c=' . $event['code']),
         'code' => $event['code'],
         'raw_slide_id' => (int) ($event['current_slide_id'] ?? 0),
-        'preload' => $next && $next['image'] ? $next['image'] : null,
+        'preload' => neighbour_images($event, $slides),
         'slide' => null,
     ];
     if (!$slide) {
@@ -308,9 +313,22 @@ function remote_state(array $event): array
     $current = current_slide($event, $slides);
     $next = next_visible_slide($event, $slides);
     $instances = [];
-    foreach (event_instances((int) $event['id']) as $inst) {
+    $all = event_instances((int) $event['id']);
+    $dots = event_dots((int) $event['id']);
+    // All text-input statements to moderate, in one query.
+    $m2ids = array_map(function ($i) { return (int) $i['id']; }, array_filter($all, function ($i) { return $i['module'] === 'm2'; }));
+    $m2subs = [];
+    if ($m2ids) {
+        $rows = q("SELECT id, instance_id, body, status FROM submissions
+                   WHERE instance_id IN (" . implode(',', $m2ids) . ") AND status IN ('pending', 'approved') AND body <> ''
+                   ORDER BY created_at")->fetchAll();
+        foreach ($rows as $r) {
+            $m2subs[(int) $r['instance_id']][$r['status']][] = ['id' => (int) $r['id'], 'body' => $r['body']];
+        }
+    }
+    foreach ($all as $inst) {
         $i = ['id' => (int) $inst['id'], 'module' => $inst['module'], 'title' => $inst['title'],
-              'is_open' => $inst['is_open'], 'dots' => instance_dots($inst)];
+              'is_open' => $inst['is_open'], 'dots' => $dots[(int) $inst['id']] ?? ['done' => 0, 'watching' => 0]];
         if ($inst['module'] === 'm1') {
             $stats = m1_stats($inst);
             $i['statements'] = array_map(function ($s) {
@@ -318,10 +336,8 @@ function remote_state(array $event): array
             }, $stats);
             $i['total_answers'] = array_sum(array_column($stats, 'n'));
         } elseif ($inst['module'] === 'm2') {
-            $i['pending'] = q("SELECT id, body FROM submissions WHERE instance_id = ? AND status = 'pending' AND body <> ''
-                               ORDER BY created_at", [$inst['id']])->fetchAll();
-            $i['approved'] = q("SELECT id, body FROM submissions WHERE instance_id = ? AND status = 'approved'
-                                ORDER BY updated_at DESC", [$inst['id']])->fetchAll();
+            $i['pending'] = $m2subs[(int) $inst['id']]['pending'] ?? [];
+            $i['approved'] = array_reverse($m2subs[(int) $inst['id']]['approved'] ?? []);
         }
         $instances[] = $i;
     }

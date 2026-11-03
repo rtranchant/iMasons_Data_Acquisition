@@ -37,12 +37,15 @@ function db(): PDO
     if ($pdo === null) {
         $c = app_config()['db'];
         $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $c['host'], $c['port'], $c['name']);
+        // The database is on another server, so every round trip counts:
+        // emulated prepares send each query in ONE round trip (native prepares need two or three),
+        // and no session setup query is needed (all times use UTC_TIMESTAMP()).
         $pdo = new PDO($dsn, $c['user'], $c['password'], [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
+            PDO::ATTR_EMULATE_PREPARES   => true,
+            PDO::ATTR_STRINGIFY_FETCHES  => false,
         ]);
-        $pdo->exec("SET time_zone = '+00:00'");
     }
     return $pdo;
 }
@@ -50,6 +53,12 @@ function db(): PDO
 /** Run a query with parameters and return the statement. */
 function q(string $sql, array $params = []): PDOStatement
 {
+    if (getenv('IMASONS_DEBUG')) {
+        $GLOBALS['__q'] = ($GLOBALS['__q'] ?? 0) + 1;
+        if (!headers_sent()) {
+            header('X-Query-Count: ' . $GLOBALS['__q']);
+        }
+    }
     $st = db()->prepare($sql);
     $st->execute($params);
     return $st;

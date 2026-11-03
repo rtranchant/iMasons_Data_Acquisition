@@ -460,8 +460,7 @@ function render_event(int $id, ?string $msg): void
     <?php
     page_end('<script>window.CSRF = ' . json_encode(csrf_token()) . ';</script>'
         . '<script src="assets/vendor/Sortable.min.js"></script>'
-        . '<script src="assets/vendor/pdf.min.js"></script>'
-        . '<script src="assets/admin.js?v=1"></script>');
+        . '<script src="assets/admin.js?v=2"></script>');
 }
 
 function render_instance(int $id, ?string $msg): void

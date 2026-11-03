@@ -16,6 +16,7 @@ try {
     if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' || !hash_equals(csrf_token(), (string) ($_SERVER['HTTP_X_CSRF'] ?? ''))) {
         json_out(['error' => 'bad_request'], 400);
     }
+    session_write_close(); // uploads can take a while; don't block the host's other pages
     $do = (string) ($_GET['do'] ?? '');
     $in = $do === 'page' ? $_POST : (json_decode((string) file_get_contents('php://input'), true) ?: []);
 

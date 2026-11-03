@@ -15,7 +15,8 @@ appear on the room's big screen, and the host runs everything from a phone remot
 ## Modules
 
 1. **Yes / No / Don't know** – slides: *Live participation*, *Results*. On phones each statement is a card:
-   swipe right = Yes, left = No, down = Don't know (buttons and arrow keys too). A statement stops being
+   swipe right = Yes, left = No, down = Don't know (buttons and arrow keys too). Statements come in random order
+   for each attendee (ones still collecting answers first, then ones needing revision). A statement stops being
    asked once it has the minimum number of answers (default 8) and enough agreement (default 75%)
    on Yes or No. Otherwise it is flagged *Needs revision*. Rewording a statement restarts its count.
 2. **Text input** – slides: *Live statements*, *Statement wall*. Optional multiple-choice questions.
@@ -49,3 +50,13 @@ Database migrations in `src/schema.php` run automatically on the next page load.
 Server settings live in `imasons_config.php` (see `config/imasons_config.example.php`), never in Git.
 
 Built for PHP 7.4+ and MariaDB 10.3+. No build step; real-time updates use polling.
+
+### Performance notes
+
+The database is on a separate server, so each query costs a network round trip. Queries use emulated
+prepares (one round trip each), the busiest requests are batched (phones 5–9 queries, remote 8–11), phones
+only write their "last seen" time every few seconds, and the admin session lock is released as soon as a request
+is authenticated. Phones poll every 1.5 s, the remote every 1.5 s, and the big screen holds a short request open
+(up to 1.5 s, checking every 120 ms) so slide changes appear almost at once. Fonts, the QR library and pdf.js are
+served from the app itself (pdf.js only when uploading); `public/assets/.htaccess` lets browsers cache static files.
+Set the environment variable `IMASONS_DEBUG=1` to get an `X-Query-Count` header on API responses.
