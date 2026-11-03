@@ -61,7 +61,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
             if ($title === '') {
                 $title = MODULES[$module]['short'];
             }
-            $id = create_instance($eventId, $module, $title);
+            $after = ($_POST['after_slide_id'] ?? '') === '' ? null : (int) $_POST['after_slide_id'];
+            $id = create_instance($eventId, $module, $title, $after);
             flash('Module added to the run of show. Set it up below.');
             redirect('admin.php?instance=' . $id);
 
@@ -77,6 +78,25 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         case 'slide_move':
             move_slide($eventId, (int) $_POST['slide_id'], (int) $_POST['dir'] > 0 ? 1 : -1);
             redirect($back . '#ros');
+
+        case 'reorder':
+            reorder_slides($eventId, array_map('intval', (array) ($_POST['ids'] ?? [])));
+            if (!empty($_POST['ajax'])) {
+                json_out(['ok' => true]);
+            }
+            redirect($back . '#ros');
+
+        case 'delete_deck':
+            q('DELETE FROM decks WHERE id = ? AND event_id = ?', [(int) ($_POST['deck_id'] ?? 0), $eventId]);
+            flash('Slides deleted.');
+            redirect($back . '#decks');
+
+        case 'rename_deck':
+            $name = str_limit((string) ($_POST['name'] ?? ''), 200);
+            if ($name !== '') {
+                q('UPDATE decks SET name = ? WHERE id = ? AND event_id = ?', [$name, (int) ($_POST['deck_id'] ?? 0), $eventId]);
+            }
+            redirect($back . '#decks');
 
         case 'slide_hide':
             q('UPDATE slides SET hidden = 1 - hidden WHERE id = ? AND event_id = ?', [(int) $_POST['slide_id'], $eventId]);
@@ -226,8 +246,17 @@ if (isset($_GET['instance'])) {
 
 function module_badge(string $module): string
 {
-    $colors = ['m1' => '', 'm2' => 'purple', 'm3' => 'green', 'm4' => 'pink'];
-    return '<span class="badge ' . $colors[$module] . '">' . h(MODULES[$module]['short']) . '</span>';
+    $colors = ['m1' => '', 'm2' => 'purple', 'm3' => 'green', 'm4' => 'pink', 'deck' => 'grey'];
+    return '<span class="badge ' . $colors[$module] . '">' . h($module === 'deck' ? 'Slides' : MODULES[$module]['short']) . '</span>';
+}
+
+function position_options(array $slides): string
+{
+    $html = '<option value="">At the end</option><option value="0">At the start</option>';
+    foreach ($slides as $i => $s) {
+        $html .= '<option value="' . $s['id'] . '">After ' . ($i + 1) . '. ' . h($s['title'] . ' – ' . $s['label']) . '</option>';
+    }
+    return $html;
 }
 
 function render_events(?string $msg): void
@@ -285,6 +314,21 @@ function render_event(int $id, ?string $msg): void
         <div class="codebox"><?= h($join) ?></div></div>
     </div>
 
+    <div class="section">Upload slides</div>
+    <div class="box" id="uploader" data-event="<?= $id ?>">
+      <p class="muted small" style="margin-top:0">In PowerPoint choose <b>File → Save As → PDF</b> (or File → Export → PNG) and upload the result.
+        Each page becomes a slide you can place between the data collection pages. Animations and videos are not carried over.</p>
+      <div class="grid2">
+        <div><label for="up-file">PDF, or PNG/JPG images</label>
+          <input type="file" id="up-file" accept="application/pdf,image/png,image/jpeg" multiple></div>
+        <div><label for="up-name">Name</label><input type="text" id="up-name" placeholder="Defaults to the file name"></div>
+        <div><label for="up-after">Place in the run of show</label>
+          <select id="up-after"><?= position_options($slides) ?></select></div>
+      </div>
+      <p><button class="btn" type="button" id="up-go">Upload slides</button></p>
+      <div id="up-status" class="small" aria-live="polite"></div>
+    </div>
+
     <div class="section">Add a data collection module</div>
     <form method="post" class="box">
       <?= csrf_field() ?><input type="hidden" name="do" value="add_instance"><input type="hidden" name="event_id" value="<?= $id ?>">
@@ -295,19 +339,23 @@ function render_event(int $id, ?string $msg): void
           </select></div>
         <div><label for="title">Title (shown on screen and phones)</label>
           <input type="text" id="title" name="title" placeholder="e.g. Where does the industry stand?"></div>
+        <div><label for="after">Place in the run of show</label>
+          <select id="after" name="after_slide_id"><?= position_options($slides) ?></select></div>
       </div>
       <p><button class="btn" type="submit">Add to run of show</button></p>
     </form>
 
     <div class="section" id="ros">Run of show</div>
-    <p class="muted small">Hidden slides are skipped. Hiding a live participation slide also hides its results. Use the arrows to reorder.</p>
+    <p class="muted small">Drag ☰ to reorder (or use the arrows). Hidden slides are skipped. Hiding a live participation slide also hides its results.</p>
     <?php if (!$slides): ?>
       <p class="muted">No slides yet. Add a module above.</p>
     <?php else: ?>
-      <div class="list">
+      <div class="list" id="ros-list" data-event="<?= $id ?>" data-csrf="<?= h(csrf_token()) ?>">
       <?php foreach ($slides as $i => $s): $isLive = (int) $event['current_slide_id'] === $s['id']; ?>
-        <div class="row<?= $s['visible'] ? '' : ' is-hidden' ?><?= $isLive ? ' is-live' : '' ?>">
-          <span class="label" style="width:22px"><?= $i + 1 ?></span>
+        <div class="row<?= $s['visible'] ? '' : ' is-hidden' ?><?= $isLive ? ' is-live' : '' ?>" data-id="<?= $s['id'] ?>">
+          <span class="handle" title="Drag to reorder" aria-hidden="true">☰</span>
+          <span class="label num" style="width:22px"><?= $i + 1 ?></span>
+          <?php if ($s['thumb']): ?><img class="thumb" src="<?= h($s['thumb']) ?>" alt="" loading="lazy"><?php endif; ?>
           <div class="grow"><?= module_badge($s['module']) ?> <b><?= h($s['title']) ?></b> – <?= h($s['label']) ?>
             <?php if ($isLive): ?> <span class="badge green">Live</span><?php endif; ?>
             <?php if ($s['hidden_by_parent']): ?><br><span class="small">Hidden because its participation slide is hidden</span><?php endif; ?>
@@ -321,11 +369,35 @@ function render_event(int $id, ?string $msg): void
             <form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="do" value="slide_hide">
               <input type="hidden" name="event_id" value="<?= $id ?>"><input type="hidden" name="slide_id" value="<?= $s['id'] ?>">
               <button class="btn light sm"><?= $s['hidden'] ? 'Show' : 'Hide' ?></button></form>
-            <a class="btn light sm" href="admin.php?instance=<?= $s['instance_id'] ?>">Edit</a>
+            <?php if ($s['kind'] === 'image'): ?>
+              <a class="btn light sm" href="#decks">Deck</a>
+            <?php else: ?>
+              <a class="btn light sm" href="admin.php?instance=<?= $s['instance_id'] ?>">Edit</a>
+            <?php endif; ?>
           </div>
         </div>
       <?php endforeach; ?>
       </div>
+    <?php endif; ?>
+
+    <?php $decks = event_decks($id); if ($decks): ?>
+    <div class="section" id="decks">Uploaded slides</div>
+    <p class="muted small">Upload a revised version to update a deck in place: its slides keep their position in the run of show.</p>
+    <div class="list">
+      <?php foreach ($decks as $d): ?>
+      <div class="row">
+        <div class="grow"><b><?= h($d['name']) ?></b><br><span class="muted small"><?= (int) $d['pages'] ?> page<?= $d['pages'] == 1 ? '' : 's' ?> · updated <?= h(substr($d['updated_at'], 0, 16)) ?> UTC</span>
+          <div class="small" id="rp-status-<?= (int) $d['id'] ?>" aria-live="polite"></div></div>
+        <div class="actions">
+          <label class="btn light sm" style="margin:0">Upload revised version
+            <input type="file" class="replace-file" data-deck="<?= (int) $d['id'] ?>" accept="application/pdf,image/png,image/jpeg" multiple hidden></label>
+          <form method="post" class="inline" onsubmit="return confirm('Delete these slides from the run of show?')"><?= csrf_field() ?>
+            <input type="hidden" name="do" value="delete_deck"><input type="hidden" name="event_id" value="<?= $id ?>">
+            <input type="hidden" name="deck_id" value="<?= (int) $d['id'] ?>"><button class="btn danger sm">Delete</button></form>
+        </div>
+      </div>
+      <?php endforeach; ?>
+    </div>
     <?php endif; ?>
 
     <?php if ($instances): ?>
@@ -352,7 +424,10 @@ function render_event(int $id, ?string $msg): void
         <p><button class="btn danger">Delete event</button></p></form>
     </div>
     <?php
-    page_end();
+    page_end('<script>window.CSRF = ' . json_encode(csrf_token()) . ';</script>'
+        . '<script src="assets/vendor/Sortable.min.js"></script>'
+        . '<script src="assets/vendor/pdf.min.js"></script>'
+        . '<script src="assets/admin.js?v=1"></script>');
 }
 
 function render_instance(int $id, ?string $msg): void

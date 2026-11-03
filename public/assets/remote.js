@@ -3,7 +3,7 @@
   'use strict';
   var code = window.EVENT_CODE, app = document.getElementById('app'), errBox = document.getElementById('err');
   var POLL_MS = 2000, lastSig = '', busy = false;
-  var MOD = { m1: 'Statements', m2: 'Text input', m3: 'Collateral', m4: 'Pledge' };
+  var MOD = { m1: 'Statements', m2: 'Text input', m3: 'Collateral', m4: 'Pledge', deck: 'Slides' };
   var STATUS = { open: ['grey', 'Collecting'], yes: ['green', 'Yes'], no: ['red', 'No'], revise: ['purple', 'Needs revision'] };
 
   function el(tag, attrs, children) {
@@ -48,11 +48,20 @@
     var inst = null;
     if (cur) st.instances.forEach(function (i) { if (i.id === cur.instance_id) inst = i; });
 
-    // Now on screen
+    var nxt = null;
+    st.slides.forEach(function (s) { if (s.id === st.next_slide_id) nxt = s; });
+
+    // Now on screen, and what comes next
     app.appendChild(el('div', { 'class': 'now' }, [
       el('div', { 'class': 'label', text: 'On screen now' }),
+      cur && cur.thumb ? el('img', { 'class': 'now-thumb', src: cur.thumb, alt: '' }) : null,
       el('div', { 'class': 'title', text: cur ? cur.title : 'Welcome screen' }),
       el('div', { 'class': 'small', style: 'color:#ABABAB', text: cur ? MOD[cur.module] + ' · ' + cur.label : 'Event name and QR code' })
+    ]));
+    app.appendChild(el('div', { 'class': 'nextup' }, [
+      el('span', { 'class': 'label', text: 'Next' }),
+      nxt && nxt.thumb ? el('img', { 'class': 'thumb', src: nxt.thumb, alt: '' }) : null,
+      el('span', { 'class': 'small', text: nxt ? nxt.title + ' – ' + nxt.label : 'End of the run of show' })
     ]));
 
     // Key numbers
@@ -124,6 +133,7 @@
       var instOf = st.instances.filter(function (i) { return i.id === s.instance_id; })[0];
       var row = el('div', { 'class': 'row' + (s.visible ? '' : ' is-hidden') + (live ? ' is-live' : '') }, [
         el('span', { 'class': 'label', style: 'width:20px', text: String(idx + 1) }),
+        s.thumb ? el('img', { 'class': 'thumb', src: s.thumb, alt: '', loading: 'lazy' }) : null,
         el('div', { 'class': 'grow' }, [
           el('b', { text: s.title }), ' – ' + s.label, el('br'),
           el('span', { 'class': 'small' }, [

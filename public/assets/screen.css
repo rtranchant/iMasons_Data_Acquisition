@@ -78,3 +78,8 @@ body { background: var(--ink); color: var(--white); font-family: "Lexend", ui-sa
 .hold { flex: 1; display: grid; grid-template-columns: 1fr minmax(0, 26vw); gap: 5vw; align-items: center; }
 .hold h1 { font-size: clamp(40px, 5.6vw, 120px); font-weight: 600; letter-spacing: -.012em; line-height: 1.05; margin: 0 0 3vh; }
 .hold p { font-size: clamp(18px, 1.8vw, 38px); font-weight: 300; color: var(--grey); margin: 0; }
+
+/* Uploaded slides: full bleed, nothing else on screen */
+body.fullbleed .stripe, body.fullbleed .top { display: none; }
+body.fullbleed #stage { padding: 0; align-items: center; justify-content: center; }
+.slideimg { width: 100vw; height: 100vh; object-fit: contain; display: block; }

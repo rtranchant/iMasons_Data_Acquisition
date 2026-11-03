@@ -22,6 +22,17 @@ appear on the room's big screen, and the host runs everything from a phone remot
 3. **Send me the collateral** – slide: *Sign-ups*. Name, email, consent.
 4. **Pledge – get me connected** – slide: *Pledges*. Pledge text, name, email, consent.
 
+### Uploaded slides
+
+Upload a deck from the event page as a **PDF** (PowerPoint: File → Save As → PDF) or as PNG/JPG images
+(File → Export → PNG). The admin's browser renders each page to an image (bundled pdf.js), so nothing needs
+installing on the server; pages are stored in the database. Choose where the slides go in the run of show,
+then drag (☰) to fine-tune. Uploading a revised version of a deck keeps its slides in place.
+Animations and embedded video are not carried over.
+
+On the big screen, slides fill the screen. When the host is logged in on the screen computer, a presenter
+clicker or the arrow keys move through the run of show.
+
 Hiding a *Live participation* slide also hides that module's results slide; Next/Previous skip hidden slides.
 
 ## Deployment

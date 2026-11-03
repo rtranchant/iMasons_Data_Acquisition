@@ -113,3 +113,14 @@ details > summary { cursor: pointer; font-weight: 600; padding: 10px 0; }
 table.data { width: 100%; border-collapse: collapse; border: 1px solid var(--ink); font-size: 14px; }
 table.data th { background: var(--light); text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 table.data th, table.data td { padding: 8px 10px; border-top: 1px solid var(--grid); vertical-align: top; }
+
+/* Run of show with slides */
+.handle { cursor: grab; color: var(--grey); font-size: 18px; user-select: none; touch-action: none; padding: 0 2px; }
+.thumb { width: 96px; aspect-ratio: 16 / 9; object-fit: contain; background: var(--ink); border: 1px solid var(--grid); flex: none; }
+.sortable-ghost { background: var(--tint); }
+.progress { height: 8px; background: var(--light); margin: 8px 0; }
+.progress i { display: block; height: 100%; background: var(--lime); width: 0; transition: width .2s; }
+.now-thumb { display: block; width: 100%; max-width: 420px; aspect-ratio: 16 / 9; object-fit: contain; background: #000; margin: 8px 0; border: 1px solid #2A2D31; }
+.nextup { display: flex; align-items: center; gap: 10px; padding: 8px 0 4px; }
+.nextup .thumb { width: 72px; }
+body.remote .row .thumb { width: 72px; }

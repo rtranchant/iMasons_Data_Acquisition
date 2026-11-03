@@ -34,10 +34,12 @@
   // ---------------------------------------------------------------- layouts
 
   function build(state) {
+    var s = state.slide;
+    if (s && s.kind === 'image') return buildImage(s);
     clearTimers();
+    document.body.classList.remove('fullbleed');
     stage.innerHTML = '';
     ui = {};
-    var s = state.slide;
     if (!s) {
       add(stage, add(el('div', 'hold'),
         add(el('div'), el('div', 'kicker', 'Welcome'), el('h1', null, state.event), el('p', null, 'Scan the code to join on your phone and keep the page open.')),
@@ -47,6 +49,22 @@
     if (s.kind === 'collect') return buildCollect(state, s);
     if (s.kind === 'results') return buildResults(s);
     if (s.kind === 'wall') return buildWall(s);
+  }
+
+  // Uploaded slide: swap in only once the image is decoded, so there is no black flash.
+  function buildImage(s) {
+    var key = layoutKey, img = new Image();
+    img.className = 'slideimg';
+    img.alt = s.title || '';
+    img.src = s.image;
+    (img.decode ? img.decode() : Promise.resolve()).catch(function () {}).then(function () {
+      if (layoutKey !== key) return; // moved on meanwhile
+      clearTimers();
+      ui = {};
+      stage.innerHTML = '';
+      document.body.classList.add('fullbleed');
+      stage.appendChild(img);
+    });
   }
 
   function buildCollect(state, s) {
@@ -112,7 +130,7 @@
 
   function update(state) {
     var s = state.slide;
-    if (!s) return;
+    if (!s || s.kind === 'image') return;
     if (ui.closed) ui.closed.style.display = s.is_open ? 'none' : '';
     if (s.dots) drawDots(s.dots, s.module);
     if (ui.num) ui.num.textContent = String(s.total_answers || 0);
@@ -225,20 +243,39 @@
 
   // ---------------------------------------------------------------- loop
 
-  var offline = document.getElementById('offline');
+  var offline = document.getElementById('offline'), shownRaw = null, preloaded = {};
   function poll() {
-    fetch('api.php?a=screen&c=' + encodeURIComponent(code), { credentials: 'same-origin', cache: 'no-store' })
+    var url = 'api.php?a=screen&c=' + encodeURIComponent(code) + (shownRaw !== null ? '&wait=' + shownRaw : '');
+    var failed = false;
+    fetch(url, { credentials: 'same-origin', cache: 'no-store' })
       .then(function (r) { return r.json(); })
       .then(function (state) {
         offline.hidden = true;
+        shownRaw = state.raw_slide_id;
         var key = state.slide ? state.slide.id + ':' + state.slide.kind : 'hold';
         if (key !== layoutKey) { layoutKey = key; build(state); }
         update(state);
+        if (state.preload && !preloaded[state.preload]) { var im = new Image(); im.src = state.preload; preloaded[state.preload] = im; }
       })
-      .catch(function () { offline.hidden = false; })
-      .then(function () { setTimeout(poll, POLL_MS); });
+      .catch(function () { offline.hidden = false; failed = true; })
+      // The server holds the request while nothing changes, so poll again straight away (back off on errors).
+      .then(function () { setTimeout(poll, failed ? POLL_MS * 2 : 50); });
   }
   poll();
+
+  // Presenter clicker / keyboard (only when the host is logged in on this computer).
+  if (window.CSRF) {
+    document.addEventListener('keydown', function (e) {
+      var action = { ArrowRight: 'next', ArrowDown: 'next', PageDown: 'next', ' ': 'next', Enter: 'next',
+                     ArrowLeft: 'prev', ArrowUp: 'prev', PageUp: 'prev', Backspace: 'prev' }[e.key];
+      if (!action) return;
+      e.preventDefault();
+      fetch('api.php?a=' + action + '&c=' + encodeURIComponent(code), {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF': window.CSRF }, body: '{}'
+      });
+    });
+  }
 
   // Rebuild on resize so the dots and wall fit the new size.
   var rt;

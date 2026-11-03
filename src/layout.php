@@ -15,7 +15,7 @@ function page_start(string $title, string $bodyClass = '', string $heading = '')
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/app.css?v=1">
+  <link rel="stylesheet" href="assets/app.css?v=2">
 </head>
 <body class="<?= h($bodyClass) ?>">
 <div class="stripe"></div>

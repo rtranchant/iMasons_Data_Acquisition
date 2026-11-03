@@ -106,4 +106,39 @@ return [
             FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE
         )$engine",
     ],
+
+    // Uploaded slide decks. Each page is stored as an image; slides of kind 'image' point at a page.
+    // A deck is replaced by uploading a new batch of pages and relinking its slides.
+    2 => [
+        "CREATE TABLE IF NOT EXISTS decks (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            event_id INT NOT NULL,
+            name VARCHAR(200) NOT NULL,
+            current_batch INT NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            INDEX (event_id),
+            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        )$engine",
+
+        "CREATE TABLE IF NOT EXISTS deck_pages (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            deck_id INT NOT NULL,
+            batch INT NOT NULL,
+            page_no INT NOT NULL,
+            pkey CHAR(16) NOT NULL,
+            mime VARCHAR(20) NOT NULL,
+            width INT NOT NULL,
+            height INT NOT NULL,
+            data MEDIUMBLOB NOT NULL,
+            thumb MEDIUMBLOB NOT NULL,
+            created_at DATETIME NOT NULL,
+            UNIQUE KEY one_page (deck_id, batch, page_no),
+            FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
+        )$engine",
+
+        "ALTER TABLE slides MODIFY instance_id INT NULL",
+        "ALTER TABLE slides ADD COLUMN page_id INT NULL,
+            ADD CONSTRAINT fk_slide_page FOREIGN KEY (page_id) REFERENCES deck_pages(id) ON DELETE CASCADE",
+    ],
 ];

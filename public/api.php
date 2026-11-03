@@ -24,6 +24,18 @@ try {
             handle_phone($event, $action, $input);
             break;
         case 'screen':
+            // Short long-poll: when the screen says which slide it shows, hold the request (max ~2 s)
+            // until the slide changes, so a click on the remote shows up within a quarter second.
+            if (isset($_GET['wait'])) {
+                $wait = (int) $_GET['wait'];
+                for ($i = 0; $i < 8; $i++) {
+                    if ((int) q('SELECT COALESCE(current_slide_id, 0) FROM events WHERE id = ?', [$event['id']])->fetchColumn() !== $wait) {
+                        break;
+                    }
+                    usleep(250000);
+                }
+                $event = event_by_id((int) $event['id']);
+            }
             json_out(screen_state($event));
             break;
         default:
@@ -161,14 +173,22 @@ function save_submission(array $inst, int $pid, array $in): ?string
 
 function screen_state(array $event): array
 {
-    $slide = current_slide($event);
+    $slides = event_slides((int) $event['id']);
+    $slide = current_slide($event, $slides);
+    $next = next_visible_slide($event, $slides);
     $out = [
         'event' => $event['name'],
         'join_url' => app_url('e.php?c=' . $event['code']),
         'code' => $event['code'],
+        'raw_slide_id' => (int) ($event['current_slide_id'] ?? 0),
+        'preload' => $next && $next['image'] ? $next['image'] : null,
         'slide' => null,
     ];
     if (!$slide) {
+        return $out;
+    }
+    if ($slide['kind'] === 'image') {
+        $out['slide'] = ['id' => $slide['id'], 'kind' => 'image', 'module' => 'deck', 'title' => $slide['title'], 'image' => $slide['image']];
         return $out;
     }
     $inst = instance_by_id($slide['instance_id']);
@@ -260,6 +280,7 @@ function remote_state(array $event): array
 {
     $slides = event_slides((int) $event['id']);
     $current = current_slide($event, $slides);
+    $next = next_visible_slide($event, $slides);
     $instances = [];
     foreach (event_instances((int) $event['id']) as $inst) {
         $i = ['id' => (int) $inst['id'], 'module' => $inst['module'], 'title' => $inst['title'],
@@ -282,9 +303,10 @@ function remote_state(array $event): array
         'event' => $event['name'],
         'online' => online_count((int) $event['id']),
         'current_slide_id' => $current ? $current['id'] : null,
+        'next_slide_id' => $next ? $next['id'] : null,
         'slides' => array_map(function ($s) {
             return ['id' => $s['id'], 'instance_id' => $s['instance_id'], 'module' => $s['module'], 'title' => $s['title'],
-                    'label' => $s['label'], 'kind' => $s['kind'], 'hidden' => $s['hidden'],
+                    'label' => $s['label'], 'kind' => $s['kind'], 'hidden' => $s['hidden'], 'thumb' => $s['thumb'],
                     'hidden_by_parent' => $s['hidden_by_parent'], 'visible' => $s['visible']];
         }, $slides),
         'instances' => $instances,
