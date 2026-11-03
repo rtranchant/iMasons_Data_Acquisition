@@ -72,10 +72,8 @@ function handle_phone(array $event, string $action, array $input): void
     $slide = current_slide($event);
     $instance = ($slide && $slide['is_open']) ? instance_by_id($slide['instance_id']) : null;
 
-    $coll = collateral_instance($event);
-    if ($coll && !$coll['is_open']) {
-        $coll = null;
-    }
+    $collAll = collateral_instance($event);
+    $coll = ($collAll && $collAll['is_open']) ? $collAll : null; // accepting sign-ups
 
     $notice = null;
     if ($action === 'collateral') {
@@ -105,13 +103,17 @@ function handle_phone(array $event, string $action, array $input): void
 
     touch_participant($pid, $instance ? (int) $instance['id'] : null);
     $out = ['event' => $event['name'], 'notice' => $notice, 'instance' => null, 'collateral' => null];
-    if ($coll) {
-        $out['collateral'] = [
-            'id' => (int) $coll['id'],
-            'intro' => $coll['config']['intro'],
-            'consent' => $coll['config']['consent'],
-            'submitted' => (bool) submission_for((int) $coll['id'], $pid),
-        ];
+    if ($collAll) {
+        $signedUp = (bool) submission_for((int) $collAll['id'], $pid);
+        // Banner: open form while sign-ups are open; greyed confirmation for anyone already signed up.
+        if ($coll || $signedUp) {
+            $out['collateral'] = [
+                'id' => (int) $collAll['id'],
+                'intro' => $collAll['config']['intro'],
+                'consent' => $collAll['config']['consent'],
+                'submitted' => $signedUp,
+            ];
+        }
     }
     if ($instance) {
         $out['instance'] = phone_view($instance, $pid);
@@ -158,7 +160,7 @@ function save_submission(array $inst, int $pid, array $in): ?string
     $status = 'approved';
 
     if ($inst['module'] === 'm2') {
-        $body = str_limit((string) ($in['body'] ?? ''), max(20, (int) $cfg['max_length']));
+        $body = str_multiline((string) ($in['body'] ?? ''), max(20, (int) $cfg['max_length']));
         if ($body === '') {
             return 'Please write something first.';
         }

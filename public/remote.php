@@ -19,6 +19,11 @@ page_start('Remote – ' . $event['name'], 'remote', 'Remote · ' . $event['name
   <button class="btn light" id="prev" type="button">← Previous</button>
   <button class="btn lime" id="next" type="button">Next →</button>
 </div>
+<form class="goto" id="goto">
+  <label for="goto-n">Go to page</label>
+  <input type="number" id="goto-n" inputmode="numeric" min="1" placeholder="#" required>
+  <button class="btn sm" type="submit">Go</button>
+</form>
 <div class="error" id="err" hidden></div>
 <div id="app"><p class="muted">Loading…</p></div>
 <p class="small muted" style="margin-top:28px">
@@ -27,4 +32,4 @@ page_start('Remote – ' . $event['name'], 'remote', 'Remote · ' . $event['name
 </p>
 <?php
 page_end('<script>window.EVENT_CODE = ' . json_encode($event['code']) . '; window.CSRF = ' . json_encode(csrf_token()) . ';</script>'
-    . '<script src="assets/remote.js?v=3"></script>');
+    . '<script src="assets/remote.js?v=4"></script>');

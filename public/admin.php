@@ -121,7 +121,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 q('UPDATE instances SET title = ? WHERE id = ?', [$title, $inst['id']]);
             }
             $cfg = $inst['config'];
-            $text = function (string $k, int $max = 2000) { return trim(mb_substr((string) ($_POST[$k] ?? ''), 0, $max)); };
+            $text = function (string $k, int $max = 2000) { return str_multiline((string) ($_POST[$k] ?? ''), $max); };
             switch ($inst['module']) {
                 case 'm1':
                     $cfg['intro'] = $text('intro', 500);
@@ -487,7 +487,7 @@ function render_instance(int $id, ?string $msg): void
 
       <?php if ($inst['module'] === 'm1'): $stats = m1_stats($inst); ?>
         <label for="intro">Instruction on phones</label>
-        <input type="text" id="intro" name="intro" value="<?= h($cfg['intro']) ?>">
+        <textarea id="intro" name="intro" style="min-height:70px"><?= h($cfg['intro']) ?></textarea>
         <div class="grid2">
           <div><label for="min">Answers needed before deciding</label><input type="number" id="min" name="min_answers" min="1" value="<?= (int) $cfg['min_answers'] ?>"></div>
           <div><label for="thr">Agreement needed to stop asking (%)</label><input type="number" id="thr" name="threshold" min="51" max="100" value="<?= (int) round($cfg['threshold'] * 100) ?>"></div>
@@ -534,7 +534,7 @@ function render_instance(int $id, ?string $msg): void
           <textarea id="pledge" name="pledge" style="min-height:80px"><?= h($cfg['pledge']) ?></textarea>
         <?php endif; ?>
         <label for="intro">Instruction on phones</label>
-        <input type="text" id="intro" name="intro" value="<?= h($cfg['intro']) ?>">
+        <textarea id="intro" name="intro" style="min-height:70px"><?= h($cfg['intro']) ?></textarea>
         <label for="consent">Consent tick box text</label>
         <textarea id="consent" name="consent" style="min-height:70px"><?= h($cfg['consent']) ?></textarea>
       </div>
@@ -588,7 +588,7 @@ function render_submissions(array $inst): void
     foreach ($rows as $r) {
         echo '<tr><td>' . h(substr($r['updated_at'], 5, 11)) . '</td>';
         if ($inst['module'] === 'm2') {
-            echo '<td>' . h($r['body']) . '</td><td>' . h($r['status']) . '</td>';
+            echo '<td class="txt">' . h($r['body']) . '</td><td>' . h($r['status']) . '</td>';
         } else {
             echo '<td>' . h($r['full_name']) . '</td><td>' . h($r['email']) . '</td>';
         }

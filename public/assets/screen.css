@@ -88,3 +88,6 @@ body { cursor: pointer; }
 .hint { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 10; background: #fff; color: var(--ink);
   padding: 12px 18px; font-size: 16px; border-left: 6px solid var(--amber); max-width: 90vw; cursor: default; }
 .hint a { color: #034F63; font-weight: 600; }
+
+/* Keep line breaks in hosts' and attendees' text */
+.pledge, .intro, .rotator q, .rotator .prompt, .kicker, .card p, .item p, .hold p { white-space: pre-line; overflow-wrap: anywhere; }

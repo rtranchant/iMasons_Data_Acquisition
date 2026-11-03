@@ -38,7 +38,9 @@
 
   function badge(cls, text) { return el('span', { 'class': 'badge ' + cls, text: text }); }
 
+  var lastState = null;
   function render(st, force) {
+    lastState = st;
     var sig = JSON.stringify(st);
     if (!force && sig === lastSig) return;
     lastSig = sig;
@@ -91,7 +93,7 @@
       if (!i.pending.length) app.appendChild(el('p', { 'class': 'muted small', text: 'Nothing waiting.' }));
       i.pending.forEach(function (p) {
         app.appendChild(el('div', { 'class': 'mod' }, [
-          el('p', { text: p.body }),
+          el('p', { 'class': 'txt', text: p.body }),
           el('div', { 'class': 'actions' }, [
             el('button', { type: 'button', 'class': 'btn sm', text: 'Approve', on: { click: act('moderate', { submission_id: +p.id, status: 'approved' }) } }),
             el('button', { type: 'button', 'class': 'btn danger sm', text: 'Reject', on: { click: act('moderate', { submission_id: +p.id, status: 'hidden' }) } })
@@ -101,7 +103,7 @@
       if (i.approved.length) {
         var d = el('details', {}, [el('summary', { text: 'On screen (' + i.approved.length + ')' })]);
         i.approved.forEach(function (p) {
-          d.appendChild(el('div', { 'class': 'mod' }, [el('p', { text: p.body }),
+          d.appendChild(el('div', { 'class': 'mod' }, [el('p', { 'class': 'txt', text: p.body }),
             el('button', { type: 'button', 'class': 'btn danger sm', text: 'Remove from screen', on: { click: act('moderate', { submission_id: +p.id, status: 'hidden' }) } })]));
         });
         app.appendChild(d);
@@ -116,7 +118,7 @@
         var bar = el('div', { 'class': 'bar' }, [['y', s.yes], ['n', s.no], ['d', s.dk]].map(function (p) { return el('i', { 'class': p[0], style: 'width:' + (100 * p[1] / n) + '%' }); }));
         app.appendChild(el('div', { 'class': 'mod' }, [
           el('div', { 'class': 'small' }, [badge(STATUS[s.status][0], STATUS[s.status][1]), ' Yes ' + s.yes + ' · No ' + s.no + " · Don't know " + s.dk]),
-          bar, el('div', { 'class': 'small', text: s.text })
+          bar, el('div', { 'class': 'small txt', text: s.text })
         ]));
       });
     }
@@ -150,6 +152,20 @@
     });
     app.appendChild(list);
   }
+
+  // Go to page N (the numbers shown in the run of show).
+  document.getElementById('goto').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var input = document.getElementById('goto-n'), n = parseInt(input.value, 10);
+    var slides = lastState ? lastState.slides : [];
+    var s = slides[n - 1];
+    if (!s) { errBox.textContent = 'There is no page ' + (input.value || '') + '. Pages go from 1 to ' + slides.length + '.'; errBox.hidden = false; return; }
+    if (!s.visible) { errBox.textContent = 'Page ' + n + ' (' + s.title + ' – ' + s.label + ') is hidden. Show it first in the run of show below.'; errBox.hidden = false; return; }
+    errBox.hidden = true;
+    input.value = '';
+    input.blur();
+    act('goto', { slide_id: s.id })();
+  });
 
   document.getElementById('next').addEventListener('click', act('next'));
   document.getElementById('prev').addEventListener('click', act('prev'));

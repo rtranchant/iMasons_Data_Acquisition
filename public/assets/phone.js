@@ -33,21 +33,31 @@
     return i.module + ':' + i.id + ':' + (i.submitted ? 'sent' : 'form');
   }
 
-  // ---- Email banner + pop-up for the session materials (shown on every page while the request is on)
-  var banner = null, modal = null;
+  // ---- Email banner + pop-up for the session materials.
+  // Always shown while the collateral request is on; greyed out once this person has signed up.
+  var banner = null, bannerSig = '', modal = null;
   function updateBanner(state) {
     var c = state.collateral;
-    var show = c && !c.submitted && !(state.instance && state.instance.id === c.id);
-    if (modal && c) return;                       // keep the pop-up as it is while it is open
-    if (!show) { if (banner) { banner.remove(); banner = null; document.body.classList.remove('has-banner'); } return; }
-    if (banner) { banner._coll = c; return; }
-    banner = el('div', { 'class': 'mail-banner', role: 'region', 'aria-label': 'Session materials' }, [
-      el('span', { text: 'Get the materials from this session by email' }),
-      el('button', { 'class': 'btn lime sm', type: 'button', text: 'Send them to me', on: { click: function () { openModal(banner._coll); } } })
-    ]);
+    if (modal && c && !c.submitted) return;          // keep the pop-up as it is while it is open
+    var sig = c ? (c.submitted ? 'done' : 'open') : '';
+    if (sig === bannerSig) { if (banner) banner._coll = c; return; }
+    bannerSig = sig;
+    if (banner) { banner.remove(); banner = null; }
+    document.body.classList.toggle('has-banner', !!c);
+    if (!c) return;
+    if (c.submitted) {
+      banner = el('div', { 'class': 'mail-banner done', role: 'status' }, [
+        el('span', { 'class': 'tick', 'aria-hidden': 'true', text: '✓' }),
+        el('span', { text: "You'll receive the materials by email after the session." })
+      ]);
+    } else {
+      banner = el('div', { 'class': 'mail-banner', role: 'region', 'aria-label': 'Session materials' }, [
+        el('span', { text: 'Get the materials from this session by email' }),
+        el('button', { 'class': 'btn lime sm', type: 'button', text: 'Send them to me', on: { click: function () { openModal(banner._coll); } } })
+      ]);
+    }
     banner._coll = c;
     document.body.appendChild(banner);
-    document.body.classList.add('has-banner');
   }
 
   function openModal(c) {
@@ -57,10 +67,10 @@
     var err = el('div', { 'class': 'error', role: 'alert', hidden: 'hidden' });
     var form = el('form', {}, [
       el('h2', { style: 'margin-top:0', text: 'Session materials' }),
-      el('p', { 'class': 'muted', text: c.intro }),
+      el('p', { 'class': 'muted txt', text: c.intro }),
       el('label', { 'for': 'm-fn', text: 'Full name' }), name,
       el('label', { 'for': 'm-em', text: 'Email' }), email,
-      el('label', { 'class': 'check', 'for': 'm-cs' }, [consent, c.consent]),
+      el('label', { 'class': 'check', 'for': 'm-cs' }, [consent, el('span', { 'class': 'txt', text: c.consent })]),
       err,
       el('div', { 'class': 'actions', style: 'margin-top:16px' }, [
         el('button', { 'class': 'btn lime', type: 'submit', text: 'Submit' }),
@@ -77,13 +87,10 @@
       btn.disabled = true; err.hidden = true;
       api('collateral', { name: name.value, email: email.value, consent: consent.checked })
         .then(function (st) {
-          box.innerHTML = '';
-          box.appendChild(el('div', {}, [
-            el('h2', { style: 'margin-top:0', text: st.notice ? 'Sorry' : 'Thank you!' }),
-            el('p', { 'class': 'lead', text: st.notice || "We'll send you the materials after the session." }),
-            el('button', { 'class': 'btn block', type: 'button', text: 'Close', on: { click: closeModal } })
-          ]));
+          if (st.notice) { err.textContent = st.notice; err.hidden = false; return; }
+          // Back to the page they were on; the banner turns grey to confirm.
           lastState = st;
+          closeModal();
         })
         .catch(function (e2) { err.textContent = e2.message || 'Connection problem – please try again.'; err.hidden = false; btn.disabled = false; });
     });
@@ -115,12 +122,17 @@
       ]));
       return;
     }
-    app.appendChild(el('div', { 'class': 'label', text: i.title }));
+    app.appendChild(el('div', { 'class': 'label txt', text: i.title }));
     ({ m1: renderM1, m2: renderM2, m3: renderContact, m4: renderContact })[i.module](i);
   }
 
-  // ---- Module 1: one statement at a time
+  // ---- Module 1: one statement at a time, as a card to swipe.
+  //      right = Yes, left = No, down = Don't know (buttons and arrow keys do the same).
+  var enterNext = false, m1Commit = null;
+  var SWIPE_PX = 110;
+
   function renderM1(i) {
+    m1Commit = null;
     if (!i.statement) {
       app.appendChild(el('div', { 'class': 'done' }, [
         el('h1', { text: 'All done – thank you!' }),
@@ -129,26 +141,98 @@
       return;
     }
     var s = i.statement;
-    function answer(a) {
-      return function () {
-        if (busy) return;
-        busy = true;
-        Array.prototype.forEach.call(app.querySelectorAll('button'), function (b) { b.disabled = true; });
-        api('m1_answer', { instance_id: i.id, statement_id: s.id, version: s.version, answer: a })
-          .then(function (st) { render(st, true); })
-          .catch(function () { render({ instance: i, notice: 'Connection problem – please try again.' }, true); })
-          .then(function () { busy = false; });
-      };
-    }
-    app.appendChild(el('p', { 'class': 'muted small', text: i.intro }));
-    app.appendChild(el('p', { 'class': 'statement', text: s.text }));
-    app.appendChild(el('div', { 'class': 'answers' }, [
-      el('button', { 'class': 'btn yes', type: 'button', on: { click: answer('yes') } }, ['Yes']),
-      el('button', { 'class': 'btn no', type: 'button', on: { click: answer('no') } }, ['No']),
-      el('button', { 'class': 'btn dk', type: 'button', on: { click: answer('dk') } }, ["Don't know"])
-    ]));
+    if (i.intro) app.appendChild(el('p', { 'class': 'muted small txt', text: i.intro }));
+
+    var stamps = {
+      yes: el('span', { 'class': 'stamp yes', text: 'Yes' }),
+      no: el('span', { 'class': 'stamp no', text: 'No' }),
+      dk: el('span', { 'class': 'stamp dk', text: "Don't know" })
+    };
+    var card = el('div', { 'class': 'swipe-card' + (enterNext ? ' enter' : ''), role: 'group', 'aria-label': 'Statement' }, [
+      el('p', { 'class': 'txt', text: s.text }), stamps.yes, stamps.no, stamps.dk
+    ]);
+    enterNext = false;
+    app.appendChild(el('div', { 'class': 'deck' }, [el('div', { 'class': 'swipe-card back', 'aria-hidden': 'true' }), card]));
+    app.appendChild(el('p', { 'class': 'swipe-hint', text: 'Swipe → Yes   ·   ← No   ·   ↓ Don\'t know' }));
+    var buttons = el('div', { 'class': 'answers3' }, [
+      el('button', { 'class': 'btn no', type: 'button', on: { click: function () { commit('no'); } } }, ['← No']),
+      el('button', { 'class': 'btn dk', type: 'button', on: { click: function () { commit('dk'); } } }, ["↓ Don't know"]),
+      el('button', { 'class': 'btn yes', type: 'button', on: { click: function () { commit('yes'); } } }, ['Yes →'])
+    ]);
+    app.appendChild(buttons);
     if (i.answered) app.appendChild(el('p', { 'class': 'counter', text: i.answered + ' answered' }));
+
+    function show(dir, amount) {
+      ['yes', 'no', 'dk'].forEach(function (k) { stamps[k].style.opacity = k === dir ? Math.min(1, amount) : 0; });
+      var tint = { yes: '0,80,5', no: '178,0,26', dk: '85,89,94' }[dir];
+      card.style.background = dir ? 'rgba(' + tint + ',' + (0.1 * Math.min(1, amount)) + ')' : '';
+    }
+    function dirOf(dx, dy) {
+      if (dy > 0 && dy > Math.abs(dx)) return ['dk', dy / SWIPE_PX];
+      if (dx > 0) return ['yes', dx / SWIPE_PX];
+      if (dx < 0) return ['no', -dx / SWIPE_PX];
+      return [null, 0];
+    }
+
+    function commit(a) {
+      if (busy) return;
+      busy = true;
+      m1Commit = null;
+      Array.prototype.forEach.call(buttons.querySelectorAll('button'), function (b) { b.disabled = true; });
+      if (navigator.vibrate) { try { navigator.vibrate(18); } catch (e) {} }
+      show(a, 1);
+      var off = { yes: 'translate(140vw, -4vh) rotate(28deg)', no: 'translate(-140vw, -4vh) rotate(-28deg)', dk: 'translate(0, 110vh) rotate(4deg)' }[a];
+      card.style.transition = 'transform .38s ease-in, opacity .38s ease-in';
+      card.style.transform = off;
+      card.style.opacity = '0.2';
+      var flown = new Promise(function (r) { setTimeout(r, 380); });
+      var sent = api('m1_answer', { instance_id: i.id, statement_id: s.id, version: s.version, answer: a });
+      Promise.all([sent, flown])
+        .then(function (res) { enterNext = true; busy = false; render(res[0], true); })
+        .catch(function () { busy = false; render({ instance: i, collateral: lastState && lastState.collateral, notice: 'Connection problem – please try again.' }, true); });
+    }
+    m1Commit = commit;
+
+    // Drag / swipe with pointer events (touch, pen and mouse).
+    var start = null, last = null;
+    card.addEventListener('pointerdown', function (e) {
+      if (busy) return;
+      start = { x: e.clientX, y: e.clientY, t: Date.now() };
+      last = { x: e.clientX, y: e.clientY, t: start.t };
+      card.setPointerCapture(e.pointerId);
+      card.style.transition = 'none';
+      card.classList.add('dragging');
+    });
+    card.addEventListener('pointermove', function (e) {
+      if (!start) return;
+      var dx = e.clientX - start.x, dy = e.clientY - start.y;
+      card.style.transform = 'translate(' + dx + 'px,' + Math.max(dy, -40) + 'px) rotate(' + (dx * 0.06) + 'deg)';
+      var d = dirOf(dx, dy);
+      show(d[0], d[1]);
+      last = { x: e.clientX, y: e.clientY, t: Date.now(), vx: (e.clientX - last.x) / Math.max(1, Date.now() - last.t), vy: (e.clientY - last.y) / Math.max(1, Date.now() - last.t) };
+    });
+    function end(e) {
+      if (!start) return;
+      card.classList.remove('dragging');
+      var dx = e.clientX - start.x, dy = e.clientY - start.y;
+      var d = dirOf(dx, dy);
+      // A quick flick counts even if it is short.
+      var flick = last && last.vx !== undefined && (Math.abs(last.vx) > 0.7 || last.vy > 0.7) && Math.max(Math.abs(dx), dy) > 40;
+      start = null;
+      if (d[0] && (d[1] >= 1 || flick)) { commit(d[0]); return; }
+      card.style.transition = 'transform .25s cubic-bezier(.2,1.4,.4,1), background .25s';
+      card.style.transform = '';
+      show(null, 0);
+    }
+    card.addEventListener('pointerup', end);
+    card.addEventListener('pointercancel', end);
   }
+
+  document.addEventListener('keydown', function (e) {
+    if (!m1Commit || modal || /input|textarea|select/i.test((e.target && e.target.tagName) || '')) return;
+    var a = { ArrowRight: 'yes', ArrowLeft: 'no', ArrowDown: 'dk' }[e.key];
+    if (a) { e.preventDefault(); m1Commit(a); }
+  });
 
   // ---- Module 2: free text + optional multiple choice
   function renderM2(i) {
@@ -156,7 +240,7 @@
       app.appendChild(el('div', { 'class': 'done' }, [
         el('h1', { text: 'Thank you!' }),
         el('p', { 'class': 'lead', text: 'Your contribution is in. It will appear on the screen once the host approves it.' }),
-        i.mine ? el('p', { 'class': 'statement', style: 'min-height:0', text: '“' + i.mine + '”' }) : null
+        i.mine ? el('p', { 'class': 'statement txt', style: 'min-height:0', text: '“' + i.mine + '”' }) : null
       ]));
       return;
     }
@@ -164,11 +248,11 @@
     var counter = el('div', { 'class': 'counter', text: '0 / ' + i.max_length });
     ta.addEventListener('input', function () { counter.textContent = ta.value.length + ' / ' + i.max_length; });
     var form = el('form', {}, [
-      el('p', { 'class': 'statement', style: 'min-height:0', text: i.prompt }),
+      el('p', { 'class': 'statement txt', style: 'min-height:0', text: i.prompt }),
       el('label', { 'for': 'body', text: 'Your answer' }), ta, counter
     ]);
     (i.questions || []).forEach(function (q, qi) {
-      var fs = el('fieldset', {}, [el('legend', { text: q.q })]);
+      var fs = el('fieldset', {}, [el('legend', { 'class': 'txt', text: q.q })]);
       q.options.forEach(function (o) {
         fs.appendChild(el('label', { 'class': 'opt' }, [el('input', { type: 'radio', name: 'q' + qi, value: o }), o]));
       });
@@ -198,14 +282,14 @@
       return;
     }
     var form = el('form', {});
-    if (i.pledge) form.appendChild(el('div', { 'class': 'pledge', text: i.pledge }));
-    if (i.intro) form.appendChild(el('p', { 'class': 'lead', text: i.intro }));
+    if (i.pledge) form.appendChild(el('div', { 'class': 'pledge txt', text: i.pledge }));
+    if (i.intro) form.appendChild(el('p', { 'class': 'lead txt', text: i.intro }));
     var name = el('input', { type: 'text', id: 'fn', autocomplete: 'name', required: 'required' });
     var email = el('input', { type: 'email', id: 'em', autocomplete: 'email', inputmode: 'email', required: 'required' });
     var consent = el('input', { type: 'checkbox', id: 'cs', required: 'required' });
     form.appendChild(el('label', { 'for': 'fn', text: 'Full name' })); form.appendChild(name);
     form.appendChild(el('label', { 'for': 'em', text: 'Email' })); form.appendChild(email);
-    form.appendChild(el('label', { 'class': 'check', 'for': 'cs' }, [consent, i.consent]));
+    form.appendChild(el('label', { 'class': 'check', 'for': 'cs' }, [consent, el('span', { 'class': 'txt', text: i.consent })]));
     var err = el('div', { 'class': 'error', role: 'alert', hidden: 'hidden' });
     form.appendChild(err);
     form.appendChild(el('p', {}, [el('button', { 'class': 'btn lime block', type: 'submit' }, [i.module === 'm4' ? 'I commit' : 'Submit'])]));

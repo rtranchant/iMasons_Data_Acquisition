@@ -116,6 +116,16 @@ function random_code(int $length = 6): string
     return $out;
 }
 
+/** Multi-line text: keeps line breaks (max one blank line in a row), tidies spaces, limits length. */
+function str_multiline(string $s, int $max): string
+{
+    $s = str_replace(["\r\n", "\r"], "\n", $s);
+    $s = preg_replace('/[ \t\x{00A0}]+/u', ' ', $s);
+    $s = preg_replace('/ *\n */', "\n", $s);
+    $s = preg_replace('/\n{3,}/', "\n\n", $s);
+    return mb_substr(trim($s), 0, $max);
+}
+
 function str_limit(string $s, int $max): string
 {
     $s = trim(preg_replace('/\s+/u', ' ', $s));
