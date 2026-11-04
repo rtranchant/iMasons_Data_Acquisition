@@ -78,7 +78,7 @@ function migrate(): void
             continue;
         }
         foreach ($statements as $sql) {
-            db()->exec($sql);
+            is_callable($sql) ? $sql() : db()->exec($sql);
         }
         q('INSERT INTO schema_migrations (version, applied_at) VALUES (?, UTC_TIMESTAMP())', [$version]);
     }

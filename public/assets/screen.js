@@ -250,21 +250,35 @@
     });
   }
 
-  // Re-fit the results rows once the brand font has loaded (it changes line heights).
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (ui.qfRes) { ui.qfRes.sig = ''; drawQfResults(); } });
-
-  // Page B: four tabs for the panel.
+  // Page B: results for the panel, built to be read from the back of the room.
+  // Keys on this page: 1–4 tabs · → / ← next / previous tab (then slide) · ↓ / ↑ next / previous 5 rows ·
+  // Enter: the top row alone, full screen · Esc: back to the list.
   var QF_TABS = ['Top problems', 'Where it breaks', 'Blind spots', 'Side by side'];
+  var QF_PER = { 1: 5, 2: 4, 3: 5, 4: 3 };   // rows per page (tab 4: per column); fewer only if the screen is too short
+  var QF_WHO = { hiring: 'the hiring side', candidate: 'the candidate side', education: 'the education side', other: 'the other side', all: 'the room' };
+  var QF_THEY = { hiring: 'employers', candidate: 'candidates', education: 'educators', other: 'they' };
+
+  function qfQuestion(tab, side) {
+    if (tab === 1) return 'What does ' + (QF_WHO[side] || 'the room') + ' see as the biggest problems?';
+    if (tab === 2) return 'Where in the journey are the strongest problems?';
+    if (tab === 3) return side === 'all' ? "What can't the room see from where it sits?" : "What can't " + (QF_THEY[side] || 'they') + ' see from where they sit?';
+    return 'Where do employers and candidates disagree?';
+  }
+
   function buildQfResults(s) {
-    ui.qfRes = { tab: s.tab || 1, data: s.results, sig: '' };
-    ui.qfRes.head = el('div', 'qf-head');
+    ui.qfRes = { tab: s.tab || 1, data: s.results, sig: '', page: 0, focus: false, per: null };
     ui.qfRes.tabs = el('div', 'qf-tabs');
+    ui.qfRes.q = el('h1', 'qf-question');
+    ui.qfRes.head = el('div', 'qf-head');
     ui.qfRes.body = el('div', 'qf-body');
-    add(stage, add(el('div', 'qf-titlebar'), el('h1', 'title qf-title', s.title), ui.qfRes.tabs), ui.qfRes.head, ui.qfRes.body);
+    ui.qfRes.pager = el('div', 'qf-pager');
+    add(stage, ui.qfRes.tabs, ui.qfRes.q, ui.qfRes.head, ui.qfRes.body, ui.qfRes.pager);
   }
   function setQfTab(t, send) {
     if (!ui.qfRes || t < 1 || t > 4) return false;
     ui.qfRes.tab = t;
+    ui.qfRes.page = 0;
+    ui.qfRes.focus = false;
     ui.qfRes.until = Date.now() + 2000;   // don't let an older reply switch it back
     drawQfResults();
     if (send && window.CSRF && currentSlide) {
@@ -275,100 +289,159 @@
     }
     return true;
   }
+  function qfRowsFor(tab, d) {
+    if (tab === 1) return d.top || [];
+    if (tab === 3) return d.blind || [];
+    return null;   // tabs 2 and 4 have a fixed number of rows
+  }
+  function setQfPage(dir) {
+    var R = ui.qfRes, rows = qfRowsFor(R.tab, R.data);
+    if (!rows || R.focus) return;
+    var pages = Math.max(1, Math.ceil(rows.length / qfPer(R)));
+    var p = Math.max(0, Math.min(pages - 1, R.page + dir));
+    if (p !== R.page) { R.page = p; drawQfResults(); }
+  }
+  function setQfFocus(on) {
+    if (!ui.qfRes) return;
+    ui.qfRes.focus = on;
+    drawQfResults();
+  }
+
+  function qfPer(R) { return R.per || QF_PER[R.tab]; }
   function drawQfResults() {
-    var R = ui.qfRes, d = R.data, sig = R.tab + JSON.stringify(d);
+    var R = ui.qfRes, d = R.data;
+    if (R.tab !== R.lastTab) { R.page = 0; R.per = null; R.lastTab = R.tab; }
+    var sig = [R.tab, R.page, R.focus, qfPer(R), JSON.stringify(d)].join('|');
     if (sig === R.sig) return;
     R.sig = sig;
     R.tabs.innerHTML = '';
     QF_TABS.forEach(function (t, i) { add(R.tabs, el('span', 'qf-tab' + (R.tab === i + 1 ? ' on' : ''), (i + 1) + ' ' + t)); });
+    // Keep the event name in the top bar clear of the tab buttons, whatever the screen width.
+    var top = R.tabs.closest('.layer') && R.tabs.closest('.layer').querySelector('.top');
+    if (top) top.style.paddingRight = (R.tabs.offsetWidth + 24 + window.innerWidth * 0.04) + 'px';
+    R.q.textContent = qfQuestion(R.tab, d.side);
     var when = d.as_of ? new Date(d.as_of.replace(' ', 'T') + 'Z') : null;
-    var stamp = when ? when.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'no answers yet';
-    var flagged = d.flag_mode === 'exclude' ? d.excluded + ' excluded as straight-liners'
-      : d.flag_mode === 'half' ? d.half + ' straight-liners at half weight' : 'straight-liners included';
-    R.head.innerHTML = '';
-    [d.side_label, d.included + ' people included', flagged, 'Data as of ' + stamp].concat(d.filter ? [d.filter] : [])
-      .forEach(function (t, i) { add(R.head, el('span', i === 0 ? 'qf-head-side' : null, t)); });
+    var parts = [d.side_label, d.included + ' people'];
+    if (d.flag_mode === 'exclude') parts.push(d.excluded + ' excluded');
+    else if (d.flag_mode === 'half') parts.push(d.half + ' at half weight');
+    parts.push(when ? 'updated ' + when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : 'no answers yet');
+    R.head.textContent = parts.join(' · ');
     R.body.innerHTML = '';
-    ({ 1: qfTop, 2: qfStages, 3: qfBlind, 4: qfCompare })[R.tab](d, R.body);
-    // Drop rows that don't fit and say how many more there are.
-    var list = R.body.querySelector('.qf-list');
-    if (list) {
-      var hidden = 0;
-      while (list.scrollHeight > list.clientHeight + 2 && list.children.length > 1) { list.removeChild(list.lastChild); hidden++; }
-      if (hidden) add(R.body, el('p', 'qf-note', '+ ' + hidden + ' more not shown'));
+    R.pager.textContent = '';
+    if (R.focus) return qfFocus(R, d);
+    ({ 1: qfTop, 2: qfStages, 3: qfBlind, 4: qfCompare })[R.tab](d, R.body, R);
+    // On a short screen, show fewer rows per page rather than shrink the text or let it overlap.
+    var last = R.body.lastElementChild;
+    var over = R.body.scrollHeight > R.body.clientHeight + 1 ||
+      (last && last.getBoundingClientRect().bottom > R.body.getBoundingClientRect().bottom + 0.5);
+    if (over && qfPer(R) > 1) {
+      R.per = qfPer(R) - 1;
+      R.page = 0;
+      R.sig = '';
+      drawQfResults();
     }
   }
-  function nTag(n) { return el('span', 'qf-n' + (n < 10 ? ' low' : ''), 'n ' + n + (n < 10 ? ' · low n' : '')); }
-  function qfTop(d, body) {
-    if (!d.top.length) { add(body, el('p', 'qf-empty', 'Not enough answers yet: statements appear once they have ' + d.min_n + ' Yes or No answers.')); return; }
-    var list = el('div', 'qf-list');
-    d.top.forEach(function (r) {
-      var bar = add(el('div', 'qf-ybar'), el('i')), mark = el('b', 'qf-mark');
-      bar.firstChild.style.width = (100 * r.yes_pct) + '%';
-      if (d.room_yes !== null) { mark.style.left = (100 * d.room_yes) + '%'; bar.appendChild(mark); }
-      add(list, add(el('div', 'qf-item'), el('p', 'qf-st', r.statement),
-        add(el('div', 'qf-meta'), add(el('div', 'qf-ywrap'), bar), el('span', 'qf-pct', pct(r.yes_pct) + ' Yes'), el('span', 'qf-lift', pts(r.lift)), nTag(r.n))));
-    });
-    add(body, list);
-    add(body, el('p', 'qf-note', 'Ranked by lift (+ points above these people\'s usual Yes rate). Black mark: the room\'s average Yes rate, ' + pct(d.room_yes) + '.'));
+  function qfRefit() { if (ui.qfRes) { ui.qfRes.per = null; ui.qfRes.sig = ''; drawQfResults(); } }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(qfRefit);
+  window.addEventListener('resize', function () { setTimeout(qfRefit, 350); });
+
+  function liftText(x) { if (x === null || x === undefined) return '–'; var r = Math.round(x); return (r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r); }
+  function nBox(n, low) {
+    return add(el('span', 'qf-nbox'), el('span', null, 'n ' + n), low ? el('span', 'qf-low', 'low n') : null);
   }
-  function qfStages(d, body) {
-    var strip = el('div', 'qf-strip results');
-    var lifts = d.stages.filter(function (s) { return s.enough; }).map(function (s) { return Math.max(0, s.lift); });
-    var maxL = Math.max(1, Math.max.apply(null, lifts.concat([1])));
+  function qfRow(big, text, frac, barCls, n, low) {
+    var bar = el('div', 'qf-thin ' + barCls), fill = el('i');
+    fill.style.width = (100 * Math.max(0, Math.min(1, frac))) + '%';
+    bar.appendChild(fill);
+    return add(el('div', 'qf-row'), el('div', 'qf-num', big), add(el('div', 'qf-mid'), el('p', 'qf-text', text), bar), nBox(n, low));
+  }
+  function qfPage(R, rows, build) {
+    var per = qfPer(R), start = R.page * per, page = rows.slice(start, start + per);
+    var list = el('div', 'qf-rows');
+    page.forEach(function (r) { list.appendChild(build(r)); });
+    R.body.appendChild(list);
+    if (rows.length > per) R.pager.textContent = (start + 1) + '–' + (start + page.length) + ' of ' + rows.length;
+    return page;
+  }
+  function qfEmpty(body, text) { add(body, el('p', 'qf-text qf-empty', text)); }
+
+  function qfTop(d, body, R) {
+    if (!d.top.length) return qfEmpty(body, 'Not enough answers yet.');
+    var max = Math.max(1, d.top[0].lift || 0);
+    R.focusRow = qfPage(R, d.top, function (r) { return qfRow(liftText(r.lift), r.statement, (r.lift || 0) / max, 'lime', r.n, r.n < 10); })[0];
+    R.focusBig = R.focusRow ? liftText(R.focusRow.lift) : null;
+  }
+  function qfBlind(d, body, R) {
+    if (!d.blind.length) return qfEmpty(body, 'No "Don\'t know" answers yet.');
+    var max = Math.max(0.01, d.blind[0].dk_share || 0);
+    R.focusRow = qfPage(R, d.blind, function (r) { return qfRow(Math.round(100 * r.dk_share) + '%', r.statement, r.dk_share / max, 'purple', r.total, r.total < 10); })[0];
+    R.focusBig = R.focusRow ? Math.round(100 * R.focusRow.dk_share) + '%' : null;
+    if (R.focusRow) R.focusRow = { statement: R.focusRow.statement, n: R.focusRow.total };
+  }
+  function qfStages(d, body, R) {
+    var strip = el('div', 'qf-blocks');
     d.stages.forEach(function (s) {
-      var b = el('div', 'qf-stage' + (s.enough ? '' : ' none'));
-      if (s.enough) b.style.background = 'rgba(196,229,0,' + (0.15 + 0.85 * Math.max(0, s.lift) / maxL).toFixed(2) + ')';
-      add(b, el('span', 'qf-stage-name', s.stage), el('span', 'qf-stage-lift', s.enough ? pts(s.lift) : 'not enough answers'));
-      add(strip, b);
+      var k = s.strong || 0;
+      var b = el('div', 'qf-block' + (!s.enough ? ' none' : k >= 2 ? ' two' : k === 1 ? ' one' : ''));
+      add(b, el('span', 'qf-block-name', s.stage));
+      if (s.enough) add(b, el('b', 'qf-block-num', String(k)), el('span', 'qf-block-sub', k === 1 ? 'strong problem' : 'strong problems'));
+      else add(b, el('span', 'qf-block-sub', 'not enough answers'));
+      strip.appendChild(b);
     });
-    add(body, strip);
-    var list = el('div', 'qf-list');
-    d.stages.forEach(function (s) {
-      if (!s.enough) return;
-      add(list, add(el('div', 'qf-item'), add(el('p', 'qf-st'), el('b', null, s.stage + ': '), document.createTextNode(s.top.statement)),
-        add(el('div', 'qf-meta'), el('span', 'qf-lift', pts(s.top.lift)), nTag(s.top.n))));
+    body.appendChild(strip);
+    var strong = d.stages.filter(function (s) { return s.enough && (s.strong || 0) >= 1 && s.top; })
+      .sort(function (a, b) { return b.top.lift - a.top.lift; }).slice(0, qfPer(R));
+    var list = el('div', 'qf-rows four');
+    strong.forEach(function (s) {
+      list.appendChild(add(el('div', 'qf-row'), el('div', 'qf-num', liftText(s.top.lift)),
+        add(el('div', 'qf-mid'), add(el('p', 'qf-text'), el('b', null, s.stage + ': '), document.createTextNode(s.top.statement))), nBox(s.top.n, s.top.n < 10)));
     });
-    add(body, list);
-    add(body, el('p', 'qf-note', 'Each stage shows the average lift of its statements with ' + d.min_n + '+ answers, and its top statement. Stages with fewer than 3 such statements say "not enough answers".'));
+    if (!strong.length) list.appendChild(el('p', 'qf-text qf-empty', 'No stage has a strong problem (lift +20 or more) yet.'));
+    body.appendChild(list);
+    R.focusRow = strong[0] ? { statement: strong[0].stage + ': ' + strong[0].top.statement, n: strong[0].top.n } : null;
+    R.focusBig = strong[0] ? liftText(strong[0].top.lift) : null;
   }
-  function qfBlind(d, body) {
-    if (!d.blind.length) { add(body, el('p', 'qf-empty', 'No "Don\'t know" answers yet on statements with ' + d.min_n + '+ answers.')); return; }
-    var list = el('div', 'qf-list');
-    d.blind.forEach(function (r) {
-      var bar = add(el('div', 'qf-ybar dk'), el('i'));
-      bar.firstChild.style.width = (100 * r.dk_share) + '%';
-      add(list, add(el('div', 'qf-item'), el('p', 'qf-st', r.statement),
-        add(el('div', 'qf-meta dk'), add(el('div', 'qf-ywrap'), bar), el('span', 'qf-pct', pct(r.dk_share) + " Don't know"), el('span', 'qf-n', 'n ' + r.total))));
-    });
-    add(body, list);
-    add(body, el('p', 'qf-note', d.side === 'hiring' ? 'What employers can\'t see from where they sit.' : 'Share of "Don\'t know" among all answers to the statement.'));
-  }
-  function qfCompare(d, body) {
+  function qfCompare(d, body, R) {
     var c = d.compare;
     if (!c.ok) {
       add(body, add(el('div', 'qf-refuse'),
-        el('p', 'qf-st', 'Not enough candidate-side answers to compare reliably. Showing the hiring-side view only.'),
-        el('p', 'qf-sub', 'Hiring side: ' + c.hiring_n + ' people · Candidate side: ' + c.candidate_n + ' people (each side needs at least 8, and statements need ' + d.min_n + '+ answers on both sides).')));
+        el('p', 'qf-text', 'Not enough candidate-side answers to compare reliably. Showing the hiring-side view only.'),
+        el('p', 'qf-small', 'Hiring side: ' + c.hiring_n + ' people · candidate side: ' + c.candidate_n + ' people.')));
+      R.focusRow = null;
       return;
     }
-    var list = el('div', 'qf-list cmp-grid'), maxAbs = 1;
-    c.rows.forEach(function (r) { maxAbs = Math.max(maxAbs, Math.abs(r.hiring_lift), Math.abs(r.candidate_lift)); });
-    function lbar(v, cls) {
-      var b = el('div', 'qf-lbar ' + cls), i = el('i');
-      var w = 50 * Math.abs(v) / maxAbs;
-      i.style.width = w + '%'; i.style.left = (v >= 0 ? 50 : 50 - w) + '%';
-      b.appendChild(i); return b;
+    var cand = c.rows.filter(function (r) { return r.gap > 0; }).sort(function (a, b) { return b.gap - a.gap; }).slice(0, qfPer(R));
+    var emp = c.rows.filter(function (r) { return r.gap < 0; }).sort(function (a, b) { return a.gap - b.gap; }).slice(0, qfPer(R));
+    function col(title, cls, rows) {
+      var box = add(el('div', 'qf-col ' + cls), el('h2', 'qf-col-title', title));
+      rows.forEach(function (r) {
+        box.appendChild(add(el('div', 'qf-card4'), el('p', 'qf-text4', r.statement),
+          add(el('div', 'qf-card4-nums'), el('b', 'qf-num', liftText(r.gap)),
+            el('span', 'qf-small', 'candidates ' + liftText(r.candidate_lift) + ' · employers ' + liftText(r.hiring_lift)))));
+      });
+      if (!rows.length) box.appendChild(el('p', 'qf-small', 'None so far.'));
+      return box;
     }
-    c.rows.forEach(function (r) {
-      add(list, add(el('div', 'qf-item cmp'), el('p', 'qf-st', r.statement),
-        add(el('div', 'qf-cmp'),
-          add(el('div', 'qf-cmp-row'), el('span', 'qf-bar-label', 'Employers'), lbar(r.hiring_lift, 'h'), el('span', 'qf-lift sm', pts(r.hiring_lift)), el('span', 'qf-n', 'n ' + r.hiring_n)),
-          add(el('div', 'qf-cmp-row'), el('span', 'qf-bar-label', 'Candidates'), lbar(r.candidate_lift, 'c'), el('span', 'qf-lift sm', pts(r.candidate_lift)), el('span', 'qf-n', 'n ' + r.candidate_n))),
-        el('span', 'qf-gap', 'Gap ' + pts(r.gap) + ' · ' + (r.gap > 0 ? 'Candidates see it more' : 'Employers see it more'))));
-    });
-    add(body, list);
-    add(body, el('p', 'qf-note', 'Compared on lift only, never on raw % Yes. Hiring side: ' + c.hiring_n + ' people · candidate side: ' + c.candidate_n + ' people.'));
+    add(body, add(el('div', 'qf-cols'), col('Candidates see it more', 'cand', cand), col('Employers see it more', 'emp', emp)));
+    var shown = cand.concat(emp), ns = shown.map(function (r) { return r.candidate_n; });
+    var range = ns.length ? (Math.min.apply(null, ns) === Math.max.apply(null, ns) ? String(ns[0]) : Math.min.apply(null, ns) + '–' + Math.max.apply(null, ns)) : '–';
+    add(body, el('p', 'qf-small qf-basis', 'Based on ' + c.hiring_n + ' hiring-side and ' + c.candidate_n + ' candidate-side people. Candidate answers per statement: ' +
+      range + ', so read the pattern, not the exact numbers.'));
+    var top = shown.sort(function (a, b) { return Math.abs(b.gap) - Math.abs(a.gap); })[0];
+    R.focusRow = top ? { statement: top.statement, n: top.candidate_n + ' candidates · ' + top.hiring_n + ' employers' } : null;
+    R.focusBig = top ? liftText(top.gap) : null;
+  }
+  // Focus mode: the top row alone, full screen.
+  function qfFocus(R, d) {
+    // Work out the current top row by drawing the tab off-screen first.
+    var scratch = el('div');
+    var keep = R.body; R.body = scratch;
+    ({ 1: qfTop, 2: qfStages, 3: qfBlind, 4: qfCompare })[R.tab](d, scratch, R);
+    R.body = keep;
+    R.pager.textContent = '';
+    if (!R.focusRow) { R.focus = false; return drawQfResults(); }
+    var n = 'n ' + R.focusRow.n;
+    add(R.body, add(el('div', 'qf-focus'), el('b', 'qf-focus-num', R.focusBig), el('p', 'qf-focus-text', R.focusRow.statement), el('span', 'qf-focus-n', n)));
   }
 
   function drawDots(d, module) {
@@ -627,25 +700,33 @@
         poll();
       });
   }
+  function onQfResultsPage() { return ui.qfRes && currentSlide && currentSlide.module === 'm5' && currentSlide.kind === 'results'; }
   document.addEventListener('keydown', function (e) {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    var onQfResults = ui.qfRes && currentSlide && currentSlide.module === 'm5' && currentSlide.kind === 'results';
-    if (onQfResults && /^[1-4]$/.test(e.key)) {
-      e.preventDefault();
-      if (!window.CSRF) { step('next'); return; }   // shows the log-in hint
-      setQfTab(parseInt(e.key, 10), true);
-      return;
+    if (onQfResultsPage()) {
+      var R = ui.qfRes;
+      if (/^[1-4]$/.test(e.key)) {
+        e.preventDefault();
+        if (!window.CSRF) { step('next'); return; }   // shows the log-in hint
+        setQfTab(parseInt(e.key, 10), true);
+        return;
+      }
+      if (e.key === 'Enter') { e.preventDefault(); setQfFocus(!R.focus); return; }
+      if (e.key === 'Escape') { e.preventDefault(); if (R.focus) setQfFocus(false); return; }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setQfPage(1); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setQfPage(-1); return; }
     }
     var action = { ArrowRight: 'next', ArrowDown: 'next', PageDown: 'next', ' ': 'next', Enter: 'next',
                    ArrowLeft: 'prev', ArrowUp: 'prev', PageUp: 'prev', Backspace: 'prev' }[e.key];
     if (!action) return;
     e.preventDefault();
     // On the results page the clicker goes through the four tabs first, then on to the next slide.
-    if (onQfResults && window.CSRF && setQfTab(ui.qfRes.tab + (action === 'next' ? 1 : -1), true)) return;
+    if (onQfResultsPage() && window.CSRF && setQfTab(ui.qfRes.tab + (action === 'next' ? 1 : -1), true)) return;
     step(action);
   });
   document.addEventListener('click', function (e) {
     if (e.button !== 0 || e.target.closest('#fs, #hint, a, button')) return;
+    if (onQfResultsPage() && window.CSRF && setQfTab(ui.qfRes.tab + 1, true)) return;
     step('next');
   });
 

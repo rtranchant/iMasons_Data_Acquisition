@@ -138,7 +138,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     break;
                 case 'm2':
                     $cfg['prompt'] = $text('prompt', 500);
-                    $cfg['max_length'] = max(20, min(500, (int) ($_POST['max_length'] ?? 120)));
+                    $cfg['max_length'] = max(20, min(3000, (int) ($_POST['max_length'] ?? 120)));
                     $cfg['questions'] = parse_questions((string) ($_POST['questions'] ?? ''));
                     break;
                 case 'm5':
@@ -594,7 +594,7 @@ function render_instance(int $id, ?string $msg): void
         <label for="prompt">Prompt</label>
         <textarea id="prompt" name="prompt" style="min-height:70px"><?= h($cfg['prompt']) ?></textarea>
         <label for="maxl">Maximum length (characters)</label>
-        <input type="number" id="maxl" name="max_length" min="20" max="500" value="<?= (int) $cfg['max_length'] ?>">
+        <input type="number" id="maxl" name="max_length" min="20" max="3000" value="<?= (int) $cfg['max_length'] ?>">
         <label for="qs">Optional multiple-choice questions</label>
         <textarea id="qs" name="questions" style="min-height:150px" placeholder="Which region are you based in?&#10;- Europe&#10;- North America&#10;- Asia Pacific&#10;&#10;How long have you been in the industry?&#10;- Under 5 years&#10;- 5 years or more"><?= h(questions_to_text($cfg['questions'])) ?></textarea>
         <p class="muted small">One question per block: the question on the first line, each option on its own line starting with "- ", and a blank line between questions.</p>
@@ -791,6 +791,12 @@ function render_qf_panels(array $inst): void
       <p><b>Stay on one side.</b> The default view is the hiring side, because that's most of the room. It shows what employers see. It cannot show what candidates experience. Only compare sides on Tab 4, and only when it shows a chart.</p>
       <p><b>Use the blind spots.</b> A high Don't know rate on the hiring side often marks exactly where the disconnect is: something that happens to candidates out of employers' sight. Take those statements to the panel's veteran and student voices, and into deep dive 1.</p>
       <p><b>Straight-liners.</b> People who said Yes to almost everything, or Yes to the check statements, are left out of the results by default. The header shows how many.</p>
+      <h3 style="margin-top:22px">What each tab on the big screen shows</h3>
+      <p><b>1. Top problems.</b> The big number is the statement's lift in points: how much more often it got a Yes than the same people usually give. The lime bar shows that lift against the top statement's. n is the number of Yes and No answers; "low n" marks fewer than 10. Statements need the minimum n set above to appear; check statements never do.</p>
+      <p><b>2. Where it breaks.</b> Each stage block counts its "strong problems": statements with a lift of +20 or more (among those with the minimum n). White = none, light lime = 1, lime = 2 or more. "Not enough answers" means the stage has fewer than 3 statements with the minimum n. Below, up to 4 stages with a strong problem, each with its top statement and lift.</p>
+      <p><b>3. Blind spots.</b> The big number is the share of "Don't know" among all answers to the statement (n counts all answers here, including Don't know). On the hiring side, this is what employers can't see from where they sit.</p>
+      <p><b>4. Side by side.</b> Candidate lift minus hiring lift, per statement, only where both sides have the minimum n and each side has at least 8 people. Left: statements candidates see as a bigger problem than employers do; right: the reverse. Never compare sides on raw % Yes. With few candidate answers per statement, read the pattern, not the exact numbers.</p>
+      <p><b>On the big screen:</b> keys 1–4 switch tabs; → and ← (or a clicker) go through the tabs and then on to the next slide; ↓ and ↑ show the next or previous 5 rows; Enter shows the top row alone, full screen; Esc goes back to the list.</p>
     </div>
     <?php
 }

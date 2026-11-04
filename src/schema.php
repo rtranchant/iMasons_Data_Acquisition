@@ -199,4 +199,18 @@ return [
             FOREIGN KEY (statement_id) REFERENCES qf_statements(id) ON DELETE CASCADE
         )$engine",
     ],
+
+    // One-off text fixes: "Armed Forced" typo in names, and US spelling for stored quick-fire statements.
+    6 => [
+        "UPDATE events SET name = REPLACE(name, 'Armed Forced', 'Armed Forces')",
+        "UPDATE instances SET title = REPLACE(title, 'Armed Forced', 'Armed Forces')",
+        function () {
+            foreach (q('SELECT id, statement, topic, theme FROM qf_statements')->fetchAll() as $r) {
+                $new = [qf_us_spelling($r['statement']), qf_us_spelling($r['topic']), qf_us_spelling($r['theme'])];
+                if ($new !== [$r['statement'], $r['topic'], $r['theme']]) {
+                    q('UPDATE qf_statements SET statement = ?, topic = ?, theme = ? WHERE id = ?', array_merge($new, [$r['id']]));
+                }
+            }
+        },
+    ],
 ];

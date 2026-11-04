@@ -25,6 +25,22 @@ const QF_CHECKS = [
 
 const QF_DEFAULT_PROMPT = "From what you've seen in the last 12 months, is this a problem that stops people getting hired?";
 
+/** US spelling for statement texts (applied on import and once to stored statements). */
+function qf_us_spelling(string $s): string
+{
+    $rules = [
+        '/\b([Ff])avour/u'                                              => '$1avor',
+        '/\b([Cc])olour/u'                                              => '$1olor',
+        '/\b([Ll])icence/u'                                             => '$1icense',
+        '/\b([Pp])ractis/u'                                             => '$1ractic',
+        '/\b([Mm])aterialis(e|ed|es|ing|ation)\b/u'                    => '$1aterializ$2',
+        '/\b([Rr])ecognis(e|ed|es|ing|able|ably|ation)\b/u'            => '$1ecogniz$2',
+        '/\b([Ee])nrolment/u'                                           => '$1nrollment',
+        '/\b([Ee])nrol(s?)\b/u'                                        => '$1nroll$2',
+    ];
+    return preg_replace(array_keys($rules), array_values($rules), $s);
+}
+
 function qf_default_config(): array
 {
     return [
@@ -122,7 +138,7 @@ function qf_import_csv(int $instanceId, string $csv): array
     $flag = function ($v) { $v = strtolower(trim((string) $v)); return in_array($v, ['1', 'yes', 'y', 'true', 'x'], true) ? 1 : 0; };
     foreach (array_slice($rows, 1) as $k => $r) {
         $code = strtoupper(trim((string) ($r[$col['id']] ?? '')));
-        $text = str_limit((string) ($r[$col['statement']] ?? ''), 600);
+        $text = qf_us_spelling(str_limit((string) ($r[$col['statement']] ?? ''), 600));
         if ($code === '' || $text === '') {
             $errors[] = 'Row ' . ($k + 2) . ': missing id or statement, skipped.';
             continue;
@@ -135,8 +151,8 @@ function qf_import_csv(int $instanceId, string $csv): array
         }
         $params = [
             $instanceId, $code,
-            str_limit((string) ($r[$col['theme']] ?? ''), 120),
-            str_limit((string) ($r[$col['topic']] ?? ''), 160),
+            qf_us_spelling(str_limit((string) ($r[$col['theme']] ?? ''), 120)),
+            qf_us_spelling(str_limit((string) ($r[$col['topic']] ?? ''), 160)),
             str_limit($stage, 60),
             $text,
             $flag($r[$col['core_set']] ?? 0),
@@ -342,7 +358,7 @@ function qf_compute(array $statements, array $people, array $answers, array $opt
  * Hiring vs candidate lift, only where both sides pass min_n on the statement and each side has
  * at least $minPeople participants included. Returns ['ok' => bool, 'hiring_n', 'candidate_n', 'rows' => top 8 by |gap|].
  */
-function qf_compare(array $statements, array $people, array $answers, array $opt, int $minPeople = 8): array
+function qf_compare(array $statements, array $people, array $answers, array $opt, int $minPeople = 8, int $limit = 8): array
 {
     $h = qf_compute($statements, $people, $answers, ['side' => 'hiring'] + $opt);
     $c = qf_compute($statements, $people, $answers, ['side' => 'candidate'] + $opt);
@@ -361,7 +377,7 @@ function qf_compare(array $statements, array $people, array $answers, array $opt
             'gap' => $cr['lift'] - $hr['lift']];
     }
     usort($out['rows'], function ($a, $b) { return abs($b['gap']) <=> abs($a['gap']); });
-    $out['rows'] = array_slice($out['rows'], 0, 8);
+    $out['rows'] = array_slice($out['rows'], 0, $limit);
     $out['ok'] = count($out['rows']) > 0;
     return $out;
 }
@@ -455,7 +471,7 @@ function qf_results(array $inst): array
         $cfg = $inst['config'];
         $opt = qf_options($cfg);
         $r = qf_compute($st, $people, $answers, $opt);
-        $cmp = qf_compare($st, $people, $answers, $opt);
+        $cmp = qf_compare($st, $people, $answers, $opt, 8, 1000);
         $round = function ($rows) {
             return array_map(function ($x) {
                 foreach (['yes_pct', 'lift', 'dk_share'] as $k) {
@@ -473,7 +489,14 @@ function qf_results(array $inst): array
             'filter' => trim(($cfg['theme'] !== '' ? 'Theme: ' . $cfg['theme'] : '') . ($cfg['stage'] !== '' ? ' Stage: ' . $cfg['stage'] : '')),
             'as_of' => $latest,
             'top' => $round($r['top']), 'blind' => $round($r['blind']),
-            'stages' => array_map(function ($s) use ($round) { if (!empty($s['top'])) { $s['top'] = $round([$s['top']])[0]; } return $s; }, $r['stages']),
+            'stages' => array_map(function ($s) use ($round, $r, $cfg) {
+                // Presentation only: how many of the stage's statements (with min n) have lift of +20 or more.
+                $s['strong'] = count(array_filter($r['rows'], function ($x) use ($s, $cfg) {
+                    return strcasecmp($x['stage'], $s['stage']) === 0 && $x['n'] >= (int) $cfg['min_n'] && $x['lift'] !== null && $x['lift'] >= 20;
+                }));
+                if (!empty($s['top'])) { $s['top'] = $round([$s['top']])[0]; }
+                return $s;
+            }, $r['stages']),
             'compare' => $cmp,
         ];
     });
