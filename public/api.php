@@ -220,6 +220,9 @@ function screen_state(array $event): array
         'code' => $event['code'],
         'raw_slide_id' => (int) ($event['current_slide_id'] ?? 0),
         'preload' => neighbour_images($event, $slides),
+        // The visible run of show in order, so the laptop can move between uploaded slides instantly.
+        'nav' => array_values(array_map(function ($s) { return ['id' => $s['id'], 'image' => $s['image']]; },
+            array_filter($slides, function ($s) { return $s['visible']; }))),
         'slide' => null,
     ];
     if (!$slide) {

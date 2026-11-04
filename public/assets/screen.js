@@ -4,9 +4,9 @@
   'use strict';
   var code = window.EVENT_CODE;
   var root = document.getElementById('screen');
-  var POLL_MS = 1500, WALL_SWAP_MS = 6000, ANSWER_MIN_MS = 10000, FADE_MS = 800, LAYER_FADE_MS = 650;
+  var POLL_MS = 1500, WALL_SWAP_MS = 6000, ANSWER_MIN_MS = 10000, FADE_MS = 800, LAYER_FADE_MS = 250;
   var WALL_SIZE = 8;
-  var layoutKey = null, ui = {}, timers = [], stage = null, currentLayer = null;
+  var layoutKey = null, ui = {}, timers = [], stage = null, currentLayer = null, shownIsImage = false;
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -46,9 +46,15 @@
     return { layer: layer, content: content };
   }
 
-  function reveal(L) {
+  // cut = true: show at once (slide to slide, like PowerPoint). Otherwise a short fade.
+  function reveal(L, cut) {
     var old = currentLayer;
     currentLayer = L.layer;
+    if (cut) {
+      L.layer.classList.add('cut', 'in');
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+      return;
+    }
     requestAnimationFrame(function () { requestAnimationFrame(function () { L.layer.classList.add('in'); }); });
     if (old) setTimeout(function () { if (old.parentNode) old.parentNode.removeChild(old); }, LAYER_FADE_MS + 50);
   }
@@ -57,9 +63,10 @@
 
   function build(state) {
     var s = state.slide;
-    if (s && s.kind === 'image') return buildImage(s, state.event);
+    if (s && s.kind === 'image') return buildImage(s.image, state.event);
     clearTimers();
     ui = {};
+    shownIsImage = false;
     var L = newLayer(state.event, true);
     stage = L.content;
     if (!s) {
@@ -76,21 +83,26 @@
     reveal(L);
   }
 
-  // Uploaded slide: fade in only once the image is decoded, so there is no flash.
-  function buildImage(s, eventName) {
+  // Uploaded slide: shown once the image is decoded (preloaded ones are ready at once), so there is no flash.
+  // From one uploaded slide to the next it is an instant cut; to or from a data collection page, a short fade.
+  function buildImage(src, eventName) {
     var key = layoutKey, img = new Image();
     img.className = 'slideimg';
-    img.alt = s.title || '';
-    img.src = s.image;
-    (img.decode ? img.decode() : Promise.resolve()).catch(function () {}).then(function () {
+    img.alt = '';
+    img.src = src;
+    function show() {
       if (layoutKey !== key) return; // moved on meanwhile
       clearTimers();
       ui = {};
+      var cut = shownIsImage;
+      shownIsImage = true;
       var L = newLayer(eventName, false);
       stage = L.content;
       stage.appendChild(img);
-      reveal(L);
-    });
+      reveal(L, cut);
+    }
+    if (img.complete && img.naturalWidth) show();
+    else (img.decode ? img.decode() : Promise.resolve()).catch(function () {}).then(show);
   }
 
   function buildCollect(state, s) {
@@ -323,12 +335,15 @@
 
   // Short requests only: ask, get the answer at once, ask again a moment later.
   // Unchanged replies are tiny ({same:true}); errors make it wait longer; a hidden tab asks rarely.
-  var POLL_VISIBLE_MS = 800, POLL_HIDDEN_MS = 10000, MAX_BACKOFF_MS = 30000;
-  var offline = document.getElementById('offline'), lastHash = '', failures = 0, pollTimer = null, polling = false;
-  var preloaded = {};
+  var POLL_VISIBLE_MS = 400, POLL_HIDDEN_MS = 10000, MAX_BACKOFF_MS = 30000;
+  var offline = document.getElementById('offline'), lastHash = '', failures = 0, pollTimer = null, polling = false, again = false;
+  var preloaded = {}, nav = [], eventName = document.title.replace(/ – Screen$/, '');
+  var pending = null;   // {id, until}: a slide this screen switched to itself and is waiting for the server to confirm
   function poll() {
-    if (polling) return;
+    // A check is already on its way: run another one as soon as it returns, never skip it.
+    if (polling) { again = true; return; }
     polling = true;
+    again = false;
     clearTimeout(pollTimer);
     var url = 'api.php?a=screen&c=' + encodeURIComponent(code) + (lastHash ? '&h=' + lastHash : '');
     fetch(url, { credentials: 'same-origin', cache: 'no-store' })
@@ -337,7 +352,12 @@
         failures = 0;
         offline.hidden = true;
         if (state.same) return;
+        // Right after a change made on this laptop, an older reply may still be on its way: ignore it.
+        if (pending && Date.now() < pending.until && state.raw_slide_id !== pending.id) return;
+        pending = null;
         lastHash = state.h || '';
+        nav = state.nav || nav;
+        eventName = state.event || eventName;
         var key = state.slide ? state.slide.id + ':' + state.slide.kind : 'hold';
         if (key !== layoutKey) { layoutKey = key; build(state); }
         update(state);
@@ -352,6 +372,7 @@
       .catch(function () { failures++; if (failures >= 2) offline.hidden = false; })
       .then(function () {
         polling = false;
+        if (again) { poll(); return; }
         var wait = document.hidden ? POLL_HIDDEN_MS : POLL_VISIBLE_MS;
         if (failures) wait = Math.min(MAX_BACKOFF_MS, 1000 * Math.pow(2, failures));
         pollTimer = setTimeout(poll, wait);
@@ -371,21 +392,53 @@
     clearTimeout(hintTimer);
     hintTimer = setTimeout(function () { h.hidden = true; }, 5000);
   }
+  // A key press or click moves at once: uploaded slides are switched here immediately (they are
+  // preloaded), and the server is told in the background. Data collection pages appear as soon as
+  // the server has answered, since they need its live data.
+  var sendTarget = null, sending = false;
   function step(action) {
     if (!window.CSRF) {
       hint('To move the slides from this computer, <a href="login.php?next=' +
         encodeURIComponent(location.pathname + location.search) + '">log in as admin</a> in this browser first.');
       return;
     }
-    chain = chain.then(function () {
-      return fetch('api.php?a=' + action + '&lite=1&c=' + encodeURIComponent(code), {
-        method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF': window.CSRF }, body: '{}'
-      }).then(function (r) {
-        if (r.status === 401) { window.CSRF = null; step(action); return; }
+    if (!nav.length) { sendCommand(action, null); return; }
+    var at = -1, cur = pending ? pending.id : (layoutKey && layoutKey !== 'hold' ? parseInt(layoutKey, 10) : 0);
+    nav.forEach(function (s, i) { if (s.id === cur) at = i; });
+    var i = at === -1 ? (action === 'next' ? 0 : nav.length - 1) : at + (action === 'next' ? 1 : -1);
+    if (i < 0 || i >= nav.length) return;   // already at the start or the end
+    var target = nav[i];
+    pending = { id: target.id, until: Date.now() + 5000 };
+    if (target.image) {
+      layoutKey = target.id + ':image';
+      buildImage(target.image, eventName);
+      // Warm up the slides around the new position for the next presses.
+      [i + 1, i + 2, i - 1].forEach(function (j) {
+        var n = nav[j];
+        if (n && n.image && !preloaded[n.image]) { var im = new Image(); im.src = n.image; if (im.decode) im.decode().catch(function () {}); preloaded[n.image] = im; }
+      });
+    }
+    sendCommand('goto', target.id);
+  }
+  // Only the latest target matters: quick presses are combined into one request.
+  function sendCommand(action, slideId) {
+    sendTarget = { action: action, id: slideId };
+    if (sending) return;
+    sending = true;
+    var t = sendTarget; sendTarget = null;
+    fetch('api.php?a=' + t.action + '&lite=1&c=' + encodeURIComponent(code), {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF': window.CSRF },
+      body: JSON.stringify(t.id ? { slide_id: t.id } : {})
+    }).then(function (r) {
+      if (r.status === 401) { window.CSRF = null; pending = null; step(t.action); return; }
+      if (!r.ok) { pending = null; layoutKey = null; }   // refused: show whatever the server says is live
+    }, function () { pending = null; hint('Could not reach the server – try again.'); })
+      .then(function () {
+        sending = false;
+        if (sendTarget) { var n = sendTarget; sendTarget = null; sendCommand(n.action, n.id); return; }
         poll();
       });
-    }).catch(function () { hint('Could not reach the server – try again.'); });
   }
   document.addEventListener('keydown', function (e) {
     if (e.altKey || e.ctrlKey || e.metaKey) return;

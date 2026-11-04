@@ -59,7 +59,7 @@ So nothing keeps a connection open, and no device sends a new request before its
 | Device | What it does |
 |---|---|
 | Attendee phone | Asks what is live every 10 s (`phone_check_s` in the config, 2–60), spread randomly so a room never asks in sync, and at once when tapped, unlocked or brought back to the page. Each answer is its own short request from a queue saved on the phone, so swiping never waits and nothing is lost on bad Wi-Fi; answers given while a request is still on its way travel together in the next one. Yes/No statements are shuffled on the phone. Requests are sent with `Connection: close`. |
-| Big screen | Short request every 0.8 s (every 10 s in a hidden tab). Unchanged replies are ~30 bytes. "Open big screen" always reuses the same tab. |
+| Big screen | Short request every 0.4 s (every 10 s in a hidden tab); unchanged replies are ~30 bytes. Key presses and clicks on the laptop switch between uploaded slides instantly (they are preloaded) and tell the server in the background; data collection pages appear as soon as the server answers. Slide to slide is an instant cut; to or from a data collection page, a 0.25 s fade. "Open big screen" always reuses the same tab. |
 | Remote | Short request every 2 s, waiting for each reply. Buttons send one request each. |
 | All | On errors they wait longer between tries (up to 30–60 s) instead of retrying faster, and show "Reconnecting". |
 

@@ -227,7 +227,7 @@ function next_visible_slide(array $event, array $slides): ?array
     return null;
 }
 
-/** Images of the next two and previous visible slides, so the screen has them ready. */
+/** Images of the next three and previous two visible slides, so the screen has them ready. */
 function neighbour_images(array $event, array $slides): array
 {
     $visible = array_values(array_filter($slides, function ($s) { return $s['visible']; }));
@@ -238,7 +238,7 @@ function neighbour_images(array $event, array $slides): array
         }
     }
     $out = [];
-    foreach ($at === null ? [0, 1] : [$at + 1, $at + 2, $at - 1] as $i) {
+    foreach ($at === null ? [0, 1, 2] : [$at + 1, $at + 2, $at + 3, $at - 1, $at - 2] as $i) {
         if (isset($visible[$i]) && $visible[$i]['image']) {
             $out[] = $visible[$i]['image'];
         }
