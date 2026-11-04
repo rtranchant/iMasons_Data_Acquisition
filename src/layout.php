@@ -15,7 +15,7 @@ function page_start(string $title, string $bodyClass = '', string $heading = '')
   <link rel="preload" href="assets/fonts/lexend-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/lexend-600.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/fonts/lexend.css?v=1">
-  <link rel="stylesheet" href="assets/app.css?v=5">
+  <link rel="stylesheet" href="assets/app.css?v=6">
 </head>
 <body class="<?= h($bodyClass) ?>">
 <div class="stripe"></div>

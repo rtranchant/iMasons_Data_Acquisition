@@ -100,6 +100,18 @@ function json_out(array $data, int $status = 200): void
     exit;
 }
 
+/** Send $data, or just {"same":true} when the caller already has this exact data (?h=<hash>). */
+function json_out_unless_same(array $data): void
+{
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $hash = substr(md5($json), 0, 12);
+    if (($_GET['h'] ?? '') === $hash) {
+        json_out(['same' => true, 'h' => $hash]);
+    }
+    $data['h'] = $hash;
+    json_out($data);
+}
+
 function is_https(): bool
 {
     return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')

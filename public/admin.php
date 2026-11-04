@@ -317,7 +317,7 @@ function render_event(int $id, ?string $msg): void
     <h1><?= h($event['name']) ?></h1>
     <div class="grid2" style="margin:20px 0">
       <div class="box ink"><div class="label">Big screen</div><p class="small muted">Open on the room's screen and press F11 for full screen.</p>
-        <a class="btn block" href="screen.php?c=<?= h($event['code']) ?>" target="_blank" rel="noopener">Open big screen</a></div>
+        <a class="btn block" href="screen.php?c=<?= h($event['code']) ?>" target="imasons_screen_<?= h($event['code']) ?>">Open big screen</a></div>
       <div class="box ink"><div class="label">Remote</div><p class="small muted">Open on your phone to run the session.</p>
         <a class="btn block" href="remote.php?c=<?= h($event['code']) ?>">Open remote</a></div>
       <div class="box ink"><div class="label">Attendee link</div><p class="small muted">The QR code on screen points here.</p>

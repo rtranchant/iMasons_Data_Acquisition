@@ -1,6 +1,6 @@
 <?php
 // JSON API polled by the attendee phones, the big screen and the remote.
-//   GET  ?a=phone&c=CODE      attendee state          POST ?a=m1_answer|submit&c=CODE
+//   GET  ?a=phone&c=CODE      attendee state          POST ?a=m1_answer|submit|collateral&c=CODE
 //   GET  ?a=screen&c=CODE     big screen state
 //   GET  ?a=remote&c=CODE     remote state (admin)    POST ?a=next|prev|goto|hide|open|moderate (admin)
 
@@ -10,7 +10,13 @@ require __DIR__ . '/../src/model.php';
 
 try {
     $action = (string) ($_GET['a'] ?? '');
-    $event = event_by_code((string) ($_GET['c'] ?? ''));
+    $code = (string) ($_GET['c'] ?? '');
+    $participant = null;
+    if (in_array($action, ['phone', 'm1_answer', 'submit', 'collateral'], true)) {
+        [$event, $participant] = phone_context($code, $_COOKIE['imp_' . strtoupper(trim($code))] ?? null);
+    } else {
+        $event = event_by_code($code);
+    }
     if (!$event) {
         json_out(['error' => 'event_not_found'], 404);
     }
@@ -22,19 +28,12 @@ try {
         case 'm1_answer':
         case 'submit':
         case 'collateral':
-            handle_phone($event, $action, $input);
+            handle_phone($event, $participant, $action, $input);
             break;
         case 'screen':
-            // Short long-poll: when the screen says which slide it shows, hold the request (max ~1.5 s)
-            // until the slide changes, so a click shows up on screen almost at once.
-            if (isset($_GET['wait'])) {
-                $wait = (int) $_GET['wait'];
-                for ($i = 0; $i < 12 && (int) ($event['current_slide_id'] ?? 0) === $wait; $i++) {
-                    usleep(120000);
-                    $event = event_by_id((int) $event['id']);
-                }
-            }
-            json_out(screen_state($event));
+            // Short request, answered at once. If nothing changed since the screen's last copy,
+            // only a tiny "same" reply is sent.
+            json_out_unless_same(screen_state($event));
             break;
         default:
             require_admin(true);
@@ -52,7 +51,7 @@ try {
                 }
                 $event = event_by_id((int) $event['id']);
             }
-            json_out(remote_state($event));
+            json_out_unless_same(remote_state($event));
     }
 } catch (Throwable $e) {
     error_log('[imasons api] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
@@ -60,11 +59,16 @@ try {
 }
 
 // ---------------------------------------------------------------- attendee phone
+// Phones never hold a connection open. They make short requests and get a small reply:
+//   GET  phone       what is live now (every 10 s, and when the attendee taps or comes back to the page)
+//   POST m1_answer   one Yes/No/Don't know answer       → {ok}
+//   POST submit      a module 2/3/4 form                → {ok} or a validation message
+//   POST collateral  the email banner form              → {ok} or a validation message
 
-function handle_phone(array $event, string $action, array $input): void
+function handle_phone(array $event, array $p, string $action, array $input): void
 {
+    header('Connection: close');   // nothing stays open between a phone and the server
     $cookie = 'imp_' . $event['code'];
-    $p = participant_for($event, $_COOKIE[$cookie] ?? null);
     if (($_COOKIE[$cookie] ?? '') !== $p['token']) {
         setcookie($cookie, $p['token'], [
             'expires' => time() + 60 * 60 * 24 * 30, 'path' => '/',
@@ -73,46 +77,47 @@ function handle_phone(array $event, string $action, array $input): void
     }
     $pid = (int) $p['id'];
 
+    if ($action === 'm1_answer') {
+        // Only the write: one INSERT per answer. Accepted while the module is open, even if the screen
+        // has moved on, so answers queued on a phone with poor Wi-Fi are not lost. A phone sends the
+        // answers given while its previous request was still on its way together in one request.
+        $answers = isset($input['answers']) && is_array($input['answers']) ? $input['answers'] : [$input];
+        m1_save_answers((int) $event['id'], (int) ($input['instance_id'] ?? 0), $pid, $answers);
+        json_out(['ok' => true]);
+    }
+
+    if ($action === 'submit' || $action === 'collateral') {
+        if ($action === 'collateral') {
+            $inst = collateral_instance($event);
+        } else {
+            $inst = instance_by_id((int) ($input['instance_id'] ?? 0));
+            if ($inst && ((int) $inst['event_id'] !== (int) $event['id'] || !in_array($inst['module'], ['m2', 'm3', 'm4'], true))) {
+                $inst = null;
+            }
+        }
+        if (!$inst || !$inst['is_open']) {
+            json_out(['ok' => false, 'closed' => true, 'message' => 'This has just closed. Thank you!']);
+        }
+        $err = save_submission($inst, $pid, $input);
+        if ($err !== null) {
+            json_out(['ok' => false, 'error' => 'validation', 'message' => $err], 422);
+        }
+        json_out(['ok' => true]);
+    }
+
+    // Read: what is live now.
     $instance = live_slide_with_instance($event);
     if ($instance && !$instance['is_open']) {
         $instance = null;
     }
-
     $collAll = collateral_instance($event);
-    $coll = ($collAll && $collAll['is_open']) ? $collAll : null; // accepting sign-ups
-
-    $notice = null;
-    if ($action === 'collateral') {
-        // From the email banner: works whatever is live, as long as the collateral request is on and open.
-        if (!$coll) {
-            $notice = 'Sign-up for the materials is closed. Thank you!';
-        } else {
-            $err = save_submission($coll, $pid, $input);
-            if ($err !== null) {
-                json_out(['error' => 'validation', 'message' => $err], 422);
-            }
-        }
-    } elseif ($action !== 'phone') {
-        $target = (int) ($input['instance_id'] ?? 0);
-        if (!$instance || (int) $instance['id'] !== $target) {
-            $notice = 'This activity has just closed. Thank you!';
-        } elseif ($action === 'm1_answer') {
-            m1_save_answer($instance, $pid, (int) ($input['statement_id'] ?? 0), (int) ($input['version'] ?? 0),
-                (string) ($input['answer'] ?? ''));
-        } else {
-            $err = save_submission($instance, $pid, $input);
-            if ($err !== null) {
-                json_out(['error' => 'validation', 'message' => $err], 422);
-            }
-        }
-    }
-
     touch_participant($p, $instance ? (int) $instance['id'] : null);
-    $out = ['event' => $event['name'], 'notice' => $notice, 'instance' => null, 'collateral' => null];
+    $checkS = max(2, min(60, (int) (app_config()['phone_check_s'] ?? PHONE_CHECK_S)));
+    $out = ['event' => $event['name'], 'instance' => null, 'collateral' => null, 'check_s' => $checkS];
     if ($collAll) {
         $signedUp = (bool) submission_for((int) $collAll['id'], $pid);
         // Banner: open form while sign-ups are open; greyed confirmation for anyone already signed up.
-        if ($coll || $signedUp) {
+        if ($collAll['is_open'] || $signedUp) {
             $out['collateral'] = [
                 'id' => (int) $collAll['id'],
                 'intro' => $collAll['config']['intro'],
@@ -132,10 +137,12 @@ function phone_view(array $inst, int $pid): array
     $cfg = $inst['config'];
     $v = ['id' => (int) $inst['id'], 'module' => $inst['module'], 'title' => $inst['title']];
     if ($inst['module'] === 'm1') {
-        [$next, $answeredCount] = m1_next_statement($inst, $pid);
+        // The phone gets every statement it can still answer and picks the order itself,
+        // so a swipe never has to wait for the server.
+        [$pool, $answeredCount] = m1_phone_pool($inst, $pid);
         $v['intro'] = $cfg['intro'];
         $v['answered'] = $answeredCount;
-        $v['statement'] = $next ? ['id' => $next['id'], 'version' => $next['version'], 'text' => $next['text']] : null;
+        $v['pool'] = $pool;
         return $v;
     }
     $sub = submission_for((int) $inst['id'], $pid);

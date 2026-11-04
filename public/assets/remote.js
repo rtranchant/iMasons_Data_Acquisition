@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var code = window.EVENT_CODE, app = document.getElementById('app'), errBox = document.getElementById('err');
-  var POLL_MS = 1500, busy = false;
+  var POLL_MS = 2000, busy = false;
   var MOD = { m1: 'Statements', m2: 'Text input', m3: 'Collateral', m4: 'Pledge', deck: 'Slides' };
   var STATUS = { open: ['grey', 'Collecting'], yes: ['green', 'Yes'], no: ['red', 'No'], revise: ['purple', 'Needs revision'] };
 
@@ -21,8 +21,12 @@
     var opts = { credentials: 'same-origin', cache: 'no-store', headers: {} };
     if (body) { opts.method = 'POST'; opts.headers['Content-Type'] = 'application/json'; opts.headers['X-CSRF'] = window.CSRF; opts.body = JSON.stringify(body); }
     return fetch('api.php?a=' + action + '&c=' + encodeURIComponent(code), opts).then(function (r) {
+      if (!r.ok && r.status !== 401 && r.status !== 400 && r.status !== 422) {
+        return r.text().then(function () { throw new Error('HTTP ' + r.status); });
+      }
       if (r.status === 401) { location.href = 'login.php?next=' + encodeURIComponent(location.pathname + location.search); throw new Error('login'); }
-      return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'error'); return j; });
+      return r.json().catch(function () { throw new Error('HTTP ' + r.status); })
+        .then(function (j) { if (!r.ok) throw new Error((j.error || 'error') + ', HTTP ' + r.status); return j; });
     });
   }
 
@@ -32,8 +36,8 @@
       busy = true;
       var btn = e && e.currentTarget;
       if (btn && btn.classList) btn.classList.add('pending');   // instant feedback while the server answers
-      call(action, body || {}).then(function (st) { errBox.hidden = true; render(st, false); })
-        .catch(function (e2) { if (e2.message !== 'login') { errBox.textContent = 'Could not reach the server – try again.'; errBox.hidden = false; } })
+      call(action, body || {}).then(function (st) { errBox.hidden = true; lastHash = st.h || ''; render(st, false); })
+        .catch(function (e2) { if (e2.message !== 'login') { errBox.textContent = 'Could not reach the server (' + e2.message + ') – try again.'; errBox.hidden = false; } })
         .then(function () { busy = false; if (btn && btn.classList) btn.classList.remove('pending'); });
     };
   }
@@ -191,12 +195,26 @@
   document.getElementById('next').addEventListener('click', act('next'));
   document.getElementById('prev').addEventListener('click', act('prev'));
 
+  // Ask, wait for the reply, then ask again: never more than one refresh in flight.
+  var failures = 0, lastHash = '', pollTimer = null;
   function poll() {
-    if (!busy && !document.hidden) {
-      call('remote').then(function (st) { errBox.hidden = true; render(st, false); })
-        .catch(function (e) { if (e.message !== 'login') { errBox.textContent = 'Connection lost – retrying…'; errBox.hidden = false; } });
-    }
-    setTimeout(poll, POLL_MS);
+    clearTimeout(pollTimer);
+    if (busy || document.hidden) { pollTimer = setTimeout(poll, POLL_MS); return; }
+    call('remote' + (lastHash ? '&h=' + lastHash : ''))
+      .then(function (st) {
+        failures = 0; errBox.hidden = true;
+        if (st.same) return;
+        lastHash = st.h || '';
+        render(st, false);
+      })
+      .catch(function (e) {
+        if (e.message === 'login') return;
+        failures++;
+        // One missed refresh is normal on venue Wi-Fi; only say something when it keeps failing.
+        if (failures >= 2) { errBox.textContent = 'Connection lost (' + e.message + ') – retrying…'; errBox.hidden = false; }
+      })
+      .then(function () { pollTimer = setTimeout(poll, failures ? Math.min(30000, 1000 * Math.pow(2, failures)) : POLL_MS); });
   }
   poll();
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); });
 })();

@@ -11,4 +11,7 @@ return [
         'password' => 'PUT-THE-DATABASE-PASSWORD-HERE',
     ],
     'admin_password' => 'CHOOSE-A-LONG-ADMIN-PASSWORD',
+    // Optional: how often an idle attendee phone checks what is live, in seconds (2–60, default 10).
+    // Phones also check at once when tapped, unlocked or brought back to the page.
+    // 'phone_check_s' => 10,
 ];

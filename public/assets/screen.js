@@ -321,27 +321,44 @@
 
   // ---------------------------------------------------------------- loop
 
-  var offline = document.getElementById('offline'), shownRaw = null, preloaded = {};
+  // Short requests only: ask, get the answer at once, ask again a moment later.
+  // Unchanged replies are tiny ({same:true}); errors make it wait longer; a hidden tab asks rarely.
+  var POLL_VISIBLE_MS = 800, POLL_HIDDEN_MS = 10000, MAX_BACKOFF_MS = 30000;
+  var offline = document.getElementById('offline'), lastHash = '', failures = 0, pollTimer = null, polling = false;
+  var preloaded = {};
   function poll() {
-    var url = 'api.php?a=screen&c=' + encodeURIComponent(code) + (shownRaw !== null ? '&wait=' + shownRaw : '');
-    var failed = false;
+    if (polling) return;
+    polling = true;
+    clearTimeout(pollTimer);
+    var url = 'api.php?a=screen&c=' + encodeURIComponent(code) + (lastHash ? '&h=' + lastHash : '');
     fetch(url, { credentials: 'same-origin', cache: 'no-store' })
-      .then(function (r) { return r.json(); })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (state) {
+        failures = 0;
         offline.hidden = true;
-        shownRaw = state.raw_slide_id;
+        if (state.same) return;
+        lastHash = state.h || '';
         var key = state.slide ? state.slide.id + ':' + state.slide.kind : 'hold';
         if (key !== layoutKey) { layoutKey = key; build(state); }
         update(state);
-        (state.preload || []).forEach(function (src) {
+        // Keep only the neighbouring slide images in memory.
+        var keep = {};
+        (state.preload || []).concat(state.slide && state.slide.image ? [state.slide.image] : []).forEach(function (src) {
+          keep[src] = true;
           if (!preloaded[src]) { var im = new Image(); im.src = src; if (im.decode) im.decode().catch(function () {}); preloaded[src] = im; }
         });
+        Object.keys(preloaded).forEach(function (src) { if (!keep[src]) delete preloaded[src]; });
       })
-      .catch(function () { offline.hidden = false; failed = true; })
-      // The server holds the request while nothing changes, so poll again straight away (back off on errors).
-      .then(function () { setTimeout(poll, failed ? POLL_MS * 2 : 50); });
+      .catch(function () { failures++; if (failures >= 2) offline.hidden = false; })
+      .then(function () {
+        polling = false;
+        var wait = document.hidden ? POLL_HIDDEN_MS : POLL_VISIBLE_MS;
+        if (failures) wait = Math.min(MAX_BACKOFF_MS, 1000 * Math.pow(2, failures));
+        pollTimer = setTimeout(poll, wait);
+      });
   }
   poll();
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); });
 
   // Laptop control: click or → / ↓ / PageDown / Space = next, ← / ↑ / PageUp = previous.
   // Works when the host is logged in in this browser; otherwise a hint explains how.
@@ -365,7 +382,8 @@
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRF': window.CSRF }, body: '{}'
       }).then(function (r) {
-        if (r.status === 401) { window.CSRF = null; step(action); }
+        if (r.status === 401) { window.CSRF = null; step(action); return; }
+        poll();
       });
     }).catch(function () { hint('Could not reach the server – try again.'); });
   }

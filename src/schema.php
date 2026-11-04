@@ -153,4 +153,9 @@ return [
             collateral_on = (SELECT COUNT(*) > 0 FROM slides s JOIN instances i ON i.id = s.instance_id
                              WHERE i.event_id = e.id AND i.module = 'm3')",
     ],
+
+    // Presence counts ("in the room", "watching") look phones up by the page they are on.
+    4 => [
+        "ALTER TABLE participants ADD INDEX seen_idx (seen_instance_id, last_seen)",
+    ],
 ];

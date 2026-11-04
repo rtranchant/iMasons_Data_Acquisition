@@ -51,12 +51,19 @@ Server settings live in `imasons_config.php` (see `config/imasons_config.example
 
 Built for PHP 7.4+ and MariaDB 10.3+. No build step; real-time updates use polling.
 
-### Performance notes
+### How the devices talk to the server
 
-The database is on a separate server, so each query costs a network round trip. Queries use emulated
-prepares (one round trip each), the busiest requests are batched (phones 5–9 queries, remote 8–11), phones
-only write their "last seen" time every few seconds, and the admin session lock is released as soon as a request
-is authenticated. Phones poll every 1.5 s, the remote every 1.5 s, and the big screen holds a short request open
-(up to 1.5 s, checking every 120 ms) so slide changes appear almost at once. Fonts, the QR library and pdf.js are
-served from the app itself (pdf.js only when uploading); `public/assets/.htaccess` lets browsers cache static files.
-Set the environment variable `IMASONS_DEBUG=1` to get an `X-Query-Count` header on API responses.
+Shared hosting limits how many PHP requests can run **at the same time**, not how many it can serve in total.
+So nothing keeps a connection open, and no device sends a new request before its last one has been answered.
+
+| Device | What it does |
+|---|---|
+| Attendee phone | Asks what is live every 10 s (`phone_check_s` in the config, 2–60), spread randomly so a room never asks in sync, and at once when tapped, unlocked or brought back to the page. Each answer is its own short request from a queue saved on the phone, so swiping never waits and nothing is lost on bad Wi-Fi; answers given while a request is still on its way travel together in the next one. Yes/No statements are shuffled on the phone. Requests are sent with `Connection: close`. |
+| Big screen | Short request every 0.8 s (every 10 s in a hidden tab). Unchanged replies are ~30 bytes. "Open big screen" always reuses the same tab. |
+| Remote | Short request every 2 s, waiting for each reply. Buttons send one request each. |
+| All | On errors they wait longer between tries (up to 30–60 s) instead of retrying faster, and show "Reconnecting". |
+
+Answer requests do only the write (one query to identify the phone, one insert per answer). In a local test
+with the PHP worker limit set to 4 and a 10 ms link to the database, 80 phones swiping every ~3 s were answered
+in 45 ms typically with at most 10 requests running at once; the previous design reached 1,400 queued requests
+and 15 s waits under the same load. Set `IMASONS_DEBUG=1` in the environment to get an `X-Query-Count` header on API responses.

@@ -5,8 +5,11 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/bootstrap.php';
 
-/** Seconds since a phone's last poll for it to count as "in the room". */
-const ONLINE_WINDOW = 20;
+/** How often an idle phone checks what is live (seconds). */
+const PHONE_CHECK_S = 10;
+
+/** Seconds since a phone's last check for it to count as "in the room" (a few missed checks allowed). */
+const ONLINE_WINDOW = 35;
 
 const MODULES = [
     'm1' => [
@@ -449,9 +452,57 @@ function participant_for(array $event, ?string $token): array
 }
 
 /** Record that a phone is here. Skips the write when nothing changed in the last few seconds. */
+/**
+ * Event and participant for a phone in ONE query (phones ask most often, so every round trip counts).
+ * Returns [event, participant]; creates the participant on first contact.
+ */
+function phone_context(string $code, ?string $token): array
+{
+    $token = (is_string($token) && preg_match('/^[a-f0-9]{32}$/', $token)) ? $token : '';
+    $row = q('SELECT e.*, p.id AS p_id, p.token AS p_token, p.last_seen AS p_last_seen, p.seen_instance_id AS p_seen
+              FROM events e LEFT JOIN participants p ON p.event_id = e.id AND p.token = ?
+              WHERE e.code = ?', [$token, strtoupper(trim($code))])->fetch();
+    if (!$row) {
+        return [null, null];
+    }
+    $p = null;
+    if ($row['p_id'] !== null) {
+        $p = ['id' => (int) $row['p_id'], 'token' => $row['p_token'], 'last_seen' => $row['p_last_seen'], 'seen_instance_id' => $row['p_seen']];
+    }
+    foreach (['p_id', 'p_token', 'p_last_seen', 'p_seen'] as $k) {
+        unset($row[$k]);
+    }
+    if (!$p) {
+        $p = participant_for($row, null);
+    }
+    return [$row, $p];
+}
+
+/**
+ * Store Yes/No answers with one INSERT each. The statement must belong to this open module of this event
+ * and still have the same wording; anything else is ignored. Returns how many were new.
+ */
+function m1_save_answers(int $eventId, int $instanceId, int $participantId, array $answers): int
+{
+    $n = 0;
+    foreach (array_slice($answers, 0, 100) as $a) {
+        $ans = (string) ($a['answer'] ?? '');
+        if (!in_array($ans, ['yes', 'no', 'dk'], true)) {
+            continue;
+        }
+        $n += q("INSERT IGNORE INTO m1_answers (statement_id, version, participant_id, answer, created_at)
+                 SELECT s.id, s.version, ?, ?, UTC_TIMESTAMP()
+                 FROM m1_statements s JOIN instances i ON i.id = s.instance_id
+                 WHERE s.id = ? AND s.version = ? AND s.active = 1
+                   AND i.id = ? AND i.event_id = ? AND i.module = 'm1' AND i.is_open = 1",
+            [$participantId, $ans, (int) ($a['statement_id'] ?? 0), (int) ($a['version'] ?? 0), $instanceId, $eventId])->rowCount();
+    }
+    return $n;
+}
+
 function touch_participant(array $p, ?int $instanceId): void
 {
-    $fresh = isset($p['last_seen']) && (time() - strtotime($p['last_seen'] . ' UTC')) < 8;
+    $fresh = isset($p['last_seen']) && (time() - strtotime($p['last_seen'] . ' UTC')) < 20;
     if ($fresh && (int) ($p['seen_instance_id'] ?? 0) === (int) $instanceId) {
         return;
     }
@@ -580,6 +631,27 @@ function m1_stats(array $instance): array
  * is not yet decided Yes/No. Statements that still need answers come before ones flagged for revision.
  * Returns [statement or null, number of answers this attendee has given].
  */
+/**
+ * Every statement this attendee can still answer: not answered by them (current wording) and not decided.
+ * Each carries its status, so the phone asks still-collecting statements before ones needing revision.
+ */
+function m1_phone_pool(array $instance, int $participantId): array
+{
+    $rows = q('SELECT a.statement_id, a.version FROM m1_answers a JOIN m1_statements s ON s.id = a.statement_id
+               WHERE s.instance_id = ? AND a.participant_id = ?', [$instance['id'], $participantId])->fetchAll();
+    $answered = [];
+    foreach ($rows as $r) {
+        $answered[$r['statement_id'] . ':' . $r['version']] = true;
+    }
+    $pool = [];
+    foreach (m1_stats($instance) as $s) {
+        if (!isset($answered[$s['id'] . ':' . $s['version']]) && ($s['status'] === 'open' || $s['status'] === 'revise')) {
+            $pool[] = ['id' => $s['id'], 'version' => $s['version'], 'text' => $s['text'], 'status' => $s['status']];
+        }
+    }
+    return [$pool, count($rows)];
+}
+
 function m1_next_statement(array $instance, int $participantId): array
 {
     $rows = q('SELECT a.statement_id, a.version FROM m1_answers a JOIN m1_statements s ON s.id = a.statement_id

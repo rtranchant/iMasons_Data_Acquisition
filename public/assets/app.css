@@ -173,3 +173,7 @@ body.has-banner main { padding-bottom: 120px; }
 .goto { display: flex; align-items: center; gap: 8px; padding: 10px 0 0; }
 .goto label { margin: 0; font-weight: 600; white-space: nowrap; }
 .goto input { width: 90px; padding: 9px 10px; }
+
+/* Phone: shown when checks or answers are being retried */
+.offline-note { position: fixed; top: 0; left: 0; right: 0; z-index: 25; background: var(--amber); color: var(--ink);
+  font-size: 13px; padding: 8px 16px; text-align: center; }
