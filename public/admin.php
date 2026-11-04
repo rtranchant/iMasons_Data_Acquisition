@@ -141,6 +141,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     $cfg['max_length'] = max(20, min(500, (int) ($_POST['max_length'] ?? 120)));
                     $cfg['questions'] = parse_questions((string) ($_POST['questions'] ?? ''));
                     break;
+                case 'm5':
+                    $cfg['prompt'] = $text('prompt', 400) ?: QF_DEFAULT_PROMPT;
+                    $cfg['set'] = in_array($_POST['set'] ?? '', ['core', 'all', 'ids'], true) ? $_POST['set'] : 'core';
+                    $cfg['ids'] = str_limit((string) ($_POST['ids'] ?? ''), 4000);
+                    $cfg['min_n'] = max(1, min(100, (int) ($_POST['min_n'] ?? 6)));
+                    $cfg['flag_min'] = max(1, min(500, (int) ($_POST['flag_min'] ?? 15)));
+                    $cfg['flag_yes'] = max(50, min(100, (int) ($_POST['flag_yes'] ?? 90))) / 100;
+                    $cfg['flag_checks'] = max(1, min(4, (int) ($_POST['flag_checks'] ?? 2)));
+                    $cfg['flag_mode'] = in_array($_POST['flag_mode'] ?? '', ['exclude', 'half', 'include'], true) ? $_POST['flag_mode'] : 'exclude';
+                    $cfg['view_side'] = in_array($_POST['view_side'] ?? '', ['hiring', 'candidate', 'education', 'all'], true) ? $_POST['view_side'] : 'hiring';
+                    $cfg['theme'] = str_limit((string) ($_POST['theme'] ?? ''), 120);
+                    $cfg['stage'] = str_limit((string) ($_POST['stage'] ?? ''), 60);
+                    $cfg['tab'] = max(1, min(4, (int) ($_POST['tab'] ?? 1)));
+                    break;
                 case 'm4':
                     $cfg['pledge'] = $text('pledge', 1000);
                     // fall through
@@ -175,9 +189,49 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
             }
             redirect($back . '#statements');
 
+        case 'qf_import':
+            if ($inst && $inst['module'] === 'm5') {
+                $csv = '';
+                if (!empty($_FILES['csv_file']['tmp_name']) && is_uploaded_file($_FILES['csv_file']['tmp_name'])) {
+                    $csv = (string) file_get_contents($_FILES['csv_file']['tmp_name']);
+                } else {
+                    $csv = (string) ($_POST['csv_text'] ?? '');
+                }
+                [$added, $updated, $errors] = qf_import_csv((int) $inst['id'], $csv);
+                flash(($added || $updated ? "Imported: $added new, $updated updated statement" . ($added + $updated === 1 ? '' : 's') . '. ' : '')
+                    . ($errors ? implode(' ', array_slice($errors, 0, 5)) . (count($errors) > 5 ? ' …and ' . (count($errors) - 5) . ' more.' : '') : ''));
+            }
+            redirect($back . '#statements');
+
+        case 'qf_open':
+            if ($inst) {
+                q('UPDATE instances SET is_open = ? WHERE id = ?', [empty($_POST['open']) ? 0 : 1, $inst['id']]);
+            }
+            redirect($back);
+
+        case 'qf_show':
+            $sid = (int) ($_POST['slide_id'] ?? 0);
+            if ($inst && q('SELECT 1 FROM slides WHERE id = ? AND instance_id = ?', [$sid, $inst['id']])->fetchColumn()) {
+                q('UPDATE slides SET hidden = 0 WHERE id = ?', [$sid]);
+                set_current_slide($eventId, $sid);
+                flash('Now on the big screen.');
+            }
+            redirect($back);
+
+        case 'qf_seed':
+            if ($inst && $inst['module'] === 'm5' && ($_POST['confirm'] ?? '') === 'DEMO') {
+                $n = qf_seed_demo($inst);
+                flash($n ? "Added $n demo participants with answers. Use Clear test answers before the session." : 'Import statements first.');
+            } else {
+                flash('Type DEMO to confirm.');
+            }
+            redirect($back);
+
         case 'reset_data':
             if ($inst && ($_POST['confirm'] ?? '') === 'RESET') {
-                if ($inst['module'] === 'm1') {
+                if ($inst['module'] === 'm5') {
+                    qf_clear((int) $inst['id']);
+                } elseif ($inst['module'] === 'm1') {
                     q('DELETE a FROM m1_answers a JOIN m1_statements s ON s.id = a.statement_id WHERE s.instance_id = ?', [$inst['id']]);
                 } else {
                     q('DELETE FROM submissions WHERE instance_id = ?', [$inst['id']]);
@@ -204,6 +258,25 @@ if (isset($_GET['export'])) {
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM so Excel reads accents correctly
+    if ($inst['module'] === 'm5') {
+        [$qst, $qpeople, $qanswers] = qf_load($inst);
+        $flags = qf_person_stats($qst, $qanswers, qf_options($inst['config']));
+        fputcsv($out, ['Statement id', 'Theme', 'Topic', 'Stage', 'Statement', 'Core set', 'Check statement',
+                       'Participant', 'Side', 'Segment', 'Answer', 'Answered at (UTC)', 'Flagged as straight-liner']);
+        $rows = q('SELECT participant_id, statement_id, answer, created FROM qf_answers WHERE instance_id = ? ORDER BY created', [$inst['id']])->fetchAll();
+        $label = ['Y' => 'Yes', 'N' => 'No', 'D' => "Don't know"];
+        foreach ($rows as $r) {
+            $s = $qst[(int) $r['statement_id']] ?? null;
+            $p = $qpeople[(int) $r['participant_id']] ?? ['side' => '', 'segment' => ''];
+            if (!$s) {
+                continue;
+            }
+            fputcsv($out, [$s['code'], $s['theme'], $s['topic'], $s['stage'], $s['statement'], $s['core_set'] ? 'Yes' : 'No', $s['is_check'] ? 'Yes' : 'No',
+                'P' . $r['participant_id'], $p['side'], $p['segment'], $label[$r['answer']] ?? $r['answer'], $r['created'],
+                !empty($flags[(int) $r['participant_id']]['flagged']) ? 'Yes' : 'No']);
+        }
+        exit;
+    }
     if ($inst['module'] === 'm1') {
         fputcsv($out, ['Statement', 'Wording version', 'Yes', 'No', "Don't know", 'Total', 'Result']);
         foreach (m1_stats($inst) as $s) {
@@ -256,7 +329,7 @@ if (isset($_GET['instance'])) {
 
 function module_badge(string $module): string
 {
-    $colors = ['m1' => '', 'm2' => 'purple', 'm3' => 'green', 'm4' => 'pink', 'deck' => 'grey'];
+    $colors = ['m1' => '', 'm2' => 'purple', 'm3' => 'green', 'm4' => 'pink', 'm5' => 'red', 'deck' => 'grey'];
     return '<span class="badge ' . $colors[$module] . '">' . h($module === 'deck' ? 'Slides' : MODULES[$module]['short']) . '</span>';
 }
 
@@ -527,6 +600,9 @@ function render_instance(int $id, ?string $msg): void
         <p class="muted small">One question per block: the question on the first line, each option on its own line starting with "- ", and a blank line between questions.</p>
       </div>
 
+      <?php elseif ($inst['module'] === 'm5'): render_qf_settings($inst); ?>
+      </div>
+
       <?php else: ?>
         <?php if ($inst['module'] === 'm4'): ?>
           <label for="pledge">Pledge</label>
@@ -551,14 +627,14 @@ function render_instance(int $id, ?string $msg): void
         <input type="hidden" name="instance_id" value="<?= $id ?>"><input type="hidden" name="statement_id" value="<?= $s['id'] ?>"></form>
     <?php endforeach; endif; ?>
 
-    <?php if ($inst['module'] !== 'm1'): render_submissions($inst); endif; ?>
+    <?php if ($inst['module'] === 'm5'): render_qf_panels($inst); elseif ($inst['module'] !== 'm1'): render_submissions($inst); endif; ?>
 
     <div class="section">Data</div>
     <div class="grid2" style="margin-top:16px">
       <div class="box"><label style="margin-top:0">Download</label><a class="btn light" href="admin.php?export=<?= $id ?>">Export CSV</a></div>
       <form method="post" class="box"><?= csrf_field() ?><input type="hidden" name="do" value="reset_data"><input type="hidden" name="instance_id" value="<?= $id ?>">
-        <label for="rst" style="margin-top:0">Clear collected answers (e.g. after a rehearsal)</label><input type="text" id="rst" name="confirm" placeholder="Type RESET">
-        <p><button class="btn danger">Clear data</button></p></form>
+        <label for="rst" style="margin-top:0"><?= $inst['module'] === 'm5' ? 'Clear test answers (all answers and profiles; statements stay)' : 'Clear collected answers (e.g. after a rehearsal)' ?></label><input type="text" id="rst" name="confirm" placeholder="Type RESET">
+        <p><button class="btn danger"><?= $inst['module'] === 'm5' ? 'Clear test answers' : 'Clear data' ?></button></p></form>
       <form method="post" class="box"><?= csrf_field() ?><input type="hidden" name="do" value="delete_instance"><input type="hidden" name="instance_id" value="<?= $id ?>">
         <label for="del" style="margin-top:0">Delete this module and its slides</label><input type="text" id="del" name="confirm" placeholder="Type DELETE">
         <p><button class="btn danger">Delete module</button></p></form>
@@ -594,4 +670,127 @@ function render_submissions(array $inst): void
         echo '</tr>';
     }
     echo '</table></div>';
+}
+
+// ---------------------------------------------------------------- quick-fire (module 5) admin
+
+function render_qf_settings(array $inst): void
+{
+    $cfg = $inst['config'];
+    $sel = function (string $name, array $opts, $cur) {
+        $h = '<select id="' . $name . '" name="' . $name . '">';
+        foreach ($opts as $v => $l) {
+            $h .= '<option value="' . h($v) . '"' . ((string) $cur === (string) $v ? ' selected' : '') . '>' . h($l) . '</option>';
+        }
+        return $h . '</select>';
+    };
+    $st = qf_statements($inst);
+    $themes = array_values(array_unique(array_filter(array_map(function ($s) { return $s['is_check'] ? '' : $s['theme']; }, $st))));
+    sort($themes);
+    $core = count(array_filter($st, function ($s) { return $s['core_set'] && !$s['is_check']; }));
+    $all = count(array_filter($st, function ($s) { return !$s['is_check']; }));
+    ?>
+        <label for="prompt">Text shown above every card</label>
+        <textarea id="prompt" name="prompt" style="min-height:60px"><?= h($cfg['prompt']) ?></textarea>
+        <div class="grid2">
+          <div><label for="set">Statement set</label>
+            <?= $sel('set', ['core' => "Core set ($core)", 'all' => "All ($all)", 'ids' => 'Pasted list of ids'], $cfg['set']) ?></div>
+          <div><label for="ids">Ids for the pasted list (e.g. the top 15 for the second pass)</label>
+            <input type="text" id="ids" name="ids" value="<?= h($cfg['ids']) ?>" placeholder="Q001, Q014, Q027"></div>
+          <div><label for="min_n">Minimum answers before a statement is shown on the results page</label>
+            <input type="number" id="min_n" name="min_n" min="1" value="<?= (int) $cfg['min_n'] ?>"></div>
+        </div>
+        <h3 style="margin-top:24px">Straight-liners</h3>
+        <p class="muted small" style="margin-top:0">Flagged if they answered at least <b>A</b> statements and said Yes to at least <b>B</b>% of them, or said Yes to <b>C</b> or more check statements.</p>
+        <div class="grid2">
+          <div><label for="flag_min">A: at least this many answers</label><input type="number" id="flag_min" name="flag_min" min="1" value="<?= (int) $cfg['flag_min'] ?>"></div>
+          <div><label for="flag_yes">B: Yes on at least (%)</label><input type="number" id="flag_yes" name="flag_yes" min="50" max="100" value="<?= (int) round($cfg['flag_yes'] * 100) ?>"></div>
+          <div><label for="flag_checks">C: Yes to this many check statements</label><input type="number" id="flag_checks" name="flag_checks" min="1" max="4" value="<?= (int) $cfg['flag_checks'] ?>"></div>
+          <div><label for="flag_mode">Flagged people are</label>
+            <?= $sel('flag_mode', ['exclude' => 'Excluded (default)', 'half' => 'Counted at half weight', 'include' => 'Included'], $cfg['flag_mode']) ?></div>
+        </div>
+        <h3 style="margin-top:24px">Results view</h3>
+        <div class="grid2">
+          <div><label for="view_side">Side shown</label>
+            <?= $sel('view_side', ['hiring' => 'Hiring side', 'candidate' => 'Candidate side', 'education' => 'Education side', 'all' => 'Everyone'], $cfg['view_side']) ?></div>
+          <div><label for="theme">Theme filter (optional)</label>
+            <?= $sel('theme', ['' => 'All themes'] + array_combine($themes, $themes), $cfg['theme']) ?></div>
+          <div><label for="stage">Stage filter (optional)</label>
+            <?= $sel('stage', ['' => 'All stages'] + array_combine(QF_STAGES, QF_STAGES), $cfg['stage']) ?></div>
+          <div><label for="tab">Tab on the results screen</label>
+            <?= $sel('tab', [1 => '1. Top problems', 2 => '2. Where it breaks', 3 => '3. Blind spots', 4 => '4. Side by side'], $cfg['tab']) ?></div>
+        </div>
+    <?php
+}
+
+function render_qf_panels(array $inst): void
+{
+    $id = (int) $inst['id'];
+    $st = qf_statements($inst);
+    $inSet = count(array_filter($st, function ($s) { return $s['in_set']; }));
+    $checks = count(array_filter($st, function ($s) { return $s['is_check']; }));
+    $live = qf_live_stats($inst);
+    $slides = q('SELECT id, kind FROM slides WHERE instance_id = ?', [$id])->fetchAll();
+    ?>
+    <div class="section">Run it</div>
+    <div class="grid2" style="margin-top:16px">
+      <form method="post" class="box accent"><?= csrf_field() ?><input type="hidden" name="do" value="qf_open"><input type="hidden" name="instance_id" value="<?= $id ?>">
+        <input type="hidden" name="open" value="<?= $inst['is_open'] ? '0' : '1' ?>">
+        <label style="margin-top:0">Quick-fire is <b><?= $inst['is_open'] ? 'open' : 'closed' ?></b></label>
+        <p class="muted small">Phones can answer only while it is open.</p>
+        <button class="btn <?= $inst['is_open'] ? 'light' : 'lime' ?>"><?= $inst['is_open'] ? 'Close it' : 'Open it' ?></button></form>
+      <div class="box">
+        <label style="margin-top:0">Show on the big screen</label>
+        <div class="actions">
+        <?php foreach ($slides as $sl): ?>
+          <form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="do" value="qf_show"><input type="hidden" name="instance_id" value="<?= $id ?>">
+            <input type="hidden" name="slide_id" value="<?= (int) $sl['id'] ?>"><button class="btn sm"><?= $sl['kind'] === 'collect' ? 'Live feedback' : 'Results' ?></button></form>
+        <?php endforeach; ?>
+        </div>
+        <p class="small"><a href="screen.php?c=<?= h(event_by_id((int) $inst['event_id'])['code']) ?>" target="imasons_screen_<?= h(event_by_id((int) $inst['event_id'])['code']) ?>">Open the big screen</a></p>
+      </div>
+      <div class="box">
+        <label style="margin-top:0">So far</label>
+        <p class="small" style="margin:0"><?= (int) $live['people'] ?> people · <?= (int) $live['answers'] ?> answers · <?= (int) $live['reached'] ?> of <?= (int) $live['active'] ?> statements have reached the minimum n</p>
+      </div>
+    </div>
+
+    <div class="section" id="statements">Statements</div>
+    <p class="muted small"><?= count($st) - $checks ?> statements loaded (<?= $inSet ?> in the current set) and <?= $checks ?> check statements (Q901–Q904, added automatically).</p>
+    <form method="post" enctype="multipart/form-data" class="box"><?= csrf_field() ?><input type="hidden" name="do" value="qf_import"><input type="hidden" name="instance_id" value="<?= $id ?>">
+      <label for="csvf" style="margin-top:0">Import statements from CSV</label>
+      <p class="muted small" style="margin-top:0">Columns: <code>id, theme, topic, stage, statement, core_set</code>, optional <code>is_check</code>, in any order. Ids already loaded are updated; new ids are added. Answers are kept.</p>
+      <input type="file" id="csvf" name="csv_file" accept=".csv,text/csv">
+      <details><summary class="small">…or paste the CSV text</summary><textarea name="csv_text" style="min-height:120px" placeholder="id,theme,topic,stage,statement,core_set"></textarea></details>
+      <p><button class="btn">Import</button></p>
+    </form>
+    <?php if ($st): ?>
+    <details><summary>Show the <?= count($st) ?> statements</summary>
+      <div style="overflow-x:auto"><table class="data"><tr><th>Id</th><th>Theme</th><th>Stage</th><th>Statement</th><th>Core</th><th>In set</th></tr>
+      <?php foreach ($st as $s): ?>
+        <tr><td><?= h($s['code']) ?></td><td><?= h($s['theme']) ?></td><td><?= h($s['stage']) ?></td><td><?= h($s['statement']) ?></td>
+            <td><?= $s['is_check'] ? 'check' : ($s['core_set'] ? 'yes' : '–') ?></td><td><?= $s['in_set'] ? 'yes' : '–' ?></td></tr>
+      <?php endforeach; ?>
+      </table></div>
+    </details>
+    <?php endif; ?>
+
+    <div class="section">Rehearsal</div>
+    <form method="post" class="box" style="margin-top:16px"><?= csrf_field() ?><input type="hidden" name="do" value="qf_seed"><input type="hidden" name="instance_id" value="<?= $id ?>">
+      <label for="demo" style="margin-top:0">Add demo answers: 40 fake people (30 hiring, 6 candidate, 4 education), one straight-liner</label>
+      <p class="muted small" style="margin-top:0">To check the big screen before the session. Remove them with <b>Clear test answers</b> below.</p>
+      <input type="text" id="demo" name="confirm" placeholder="Type DEMO" style="max-width:220px"> <button class="btn light">Add demo answers</button>
+    </form>
+
+    <div class="section">How to read the results</div>
+    <div class="box qf-howto" style="margin-top:16px">
+      <p><b>What a Yes means.</b> Someone has seen this problem stop people getting hired in the last 12 months. It is experience, not opinion.</p>
+      <p><b>Rank by lift, not % Yes.</b> Most people say Yes to most statements. Lift shows how much more often a statement got a Yes than those same people usually give. +25 is a strong signal; +5 or less is the room's normal level of agreement.</p>
+      <p><b>Check n.</b> n is how many Yes and No answers a statement has. Under 10, treat it as a hint, not a finding. A gap of less than about 15 points between two statements with small n is not a real difference.</p>
+      <p><b>This is the room, not the industry.</b> About 60 people, mostly from the hiring side, who chose to attend. Use the results to decide which problems to explore, not to quantify them.</p>
+      <p><b>Stay on one side.</b> The default view is the hiring side, because that's most of the room. It shows what employers see. It cannot show what candidates experience. Only compare sides on Tab 4, and only when it shows a chart.</p>
+      <p><b>Use the blind spots.</b> A high Don't know rate on the hiring side often marks exactly where the disconnect is: something that happens to candidates out of employers' sight. Take those statements to the panel's veteran and student voices, and into deep dive 1.</p>
+      <p><b>Straight-liners.</b> People who said Yes to almost everything, or Yes to the check statements, are left out of the results by default. The header shows how many.</p>
+    </div>
+    <?php
 }

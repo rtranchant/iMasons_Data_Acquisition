@@ -4,6 +4,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/quickfire.php';
 
 /** How often an idle phone checks what is live (seconds). */
 const PHONE_CHECK_S = 10;
@@ -33,6 +34,11 @@ const MODULES = [
         'short'  => 'Pledge',
         'slides' => ['collect' => 'Pledges'],
     ],
+    'm5' => [
+        'name'   => 'Quick-fire cards',
+        'short'  => 'Quick-fire',
+        'slides' => ['collect' => 'Live feedback', 'results' => 'Results'],
+    ],
 ];
 
 function default_config(string $module): array
@@ -55,6 +61,8 @@ function default_config(string $module): array
                 'intro'   => "Leave your details and we'll send you the materials created in this session.",
                 'consent' => 'I agree that iMasons may store my name and email address to send me these materials.',
             ];
+        case 'm5':
+            return qf_default_config();
         case 'm4':
             return [
                 'pledge'  => 'I commit to ...',
@@ -112,6 +120,9 @@ function create_instance(int $eventId, string $module, string $title, ?int $afte
         $new[] = ['kind' => $kind, 'instance_id' => $id];
     }
     insert_slides($eventId, $afterSlideId, $new);
+    if ($module === 'm5') {
+        qf_ensure_checks($id);
+    }
     return $id;
 }
 
@@ -540,6 +551,8 @@ function instance_dots(array $instance): array
         $contributors = q('SELECT DISTINCT a.participant_id FROM m1_answers a
                            JOIN m1_statements s ON s.id = a.statement_id
                            WHERE s.instance_id = ?', [$id])->fetchAll(PDO::FETCH_COLUMN);
+    } elseif ($instance['module'] === 'm5') {
+        $contributors = q('SELECT participant_id FROM qf_participants WHERE instance_id = ?', [$id])->fetchAll(PDO::FETCH_COLUMN);
     } else {
         $contributors = q('SELECT participant_id FROM submissions WHERE instance_id = ?', [$id])->fetchAll(PDO::FETCH_COLUMN);
     }
@@ -559,7 +572,10 @@ function event_dots(int $eventId): array
                WHERE i.event_id = ? GROUP BY s.instance_id
                UNION ALL
                SELECT su.instance_id, COUNT(*) FROM submissions su JOIN instances i ON i.id = su.instance_id
-               WHERE i.event_id = ? GROUP BY su.instance_id', [$eventId, $eventId])->fetchAll();
+               WHERE i.event_id = ? GROUP BY su.instance_id
+               UNION ALL
+               SELECT qp.instance_id, COUNT(*) FROM qf_participants qp JOIN instances i ON i.id = qp.instance_id
+               WHERE i.event_id = ? GROUP BY qp.instance_id', [$eventId, $eventId, $eventId])->fetchAll();
     foreach ($done as $r) {
         $out[(int) $r['iid']] = ['done' => (int) $r['n'], 'watching' => 0];
     }
@@ -569,7 +585,8 @@ function event_dots(int $eventId): array
                      AND NOT (
                        (i.module = 'm1' AND EXISTS (SELECT 1 FROM m1_answers a JOIN m1_statements s ON s.id = a.statement_id
                                                     WHERE s.instance_id = i.id AND a.participant_id = p.id))
-                       OR (i.module <> 'm1' AND EXISTS (SELECT 1 FROM submissions su WHERE su.instance_id = i.id AND su.participant_id = p.id)))
+                       OR (i.module = 'm5' AND EXISTS (SELECT 1 FROM qf_participants qp WHERE qp.instance_id = i.id AND qp.participant_id = p.id))
+                       OR (i.module NOT IN ('m1', 'm5') AND EXISTS (SELECT 1 FROM submissions su WHERE su.instance_id = i.id AND su.participant_id = p.id)))
                    GROUP BY p.seen_instance_id", [$eventId, ONLINE_WINDOW])->fetchAll();
     foreach ($watching as $r) {
         $iid = (int) $r['iid'];

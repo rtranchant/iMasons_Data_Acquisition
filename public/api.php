@@ -12,7 +12,7 @@ try {
     $action = (string) ($_GET['a'] ?? '');
     $code = (string) ($_GET['c'] ?? '');
     $participant = null;
-    if (in_array($action, ['phone', 'm1_answer', 'submit', 'collateral'], true)) {
+    if (in_array($action, ['phone', 'm1_answer', 'submit', 'collateral', 'qf_profile', 'qf_answer'], true)) {
         [$event, $participant] = phone_context($code, $_COOKIE['imp_' . strtoupper(trim($code))] ?? null);
     } else {
         $event = event_by_code($code);
@@ -28,6 +28,8 @@ try {
         case 'm1_answer':
         case 'submit':
         case 'collateral':
+        case 'qf_profile':
+        case 'qf_answer':
             handle_phone($event, $participant, $action, $input);
             break;
         case 'screen':
@@ -77,6 +79,16 @@ function handle_phone(array $event, array $p, string $action, array $input): voi
     }
     $pid = (int) $p['id'];
 
+    if ($action === 'qf_profile') {
+        qf_save_profile($event, $pid, $input);
+        json_out(['ok' => true]);
+    }
+    if ($action === 'qf_answer') {
+        // Quick-fire: one write per answer, grouped when several were waiting on the phone.
+        $answers = isset($input['answers']) && is_array($input['answers']) ? $input['answers'] : [$input];
+        qf_save_answers((int) $event['id'], (int) ($input['instance_id'] ?? 0), $pid, $answers);
+        json_out(['ok' => true]);
+    }
     if ($action === 'm1_answer') {
         // Only the write: one INSERT per answer. Accepted while the module is open, even if the screen
         // has moved on, so answers queued on a phone with poor Wi-Fi are not lost. A phone sends the
@@ -144,6 +156,9 @@ function phone_view(array $inst, int $pid): array
         $v['answered'] = $answeredCount;
         $v['pool'] = $pool;
         return $v;
+    }
+    if ($inst['module'] === 'm5') {
+        return $v + qf_phone_view($inst, $pid, (string) ($_GET['qh'] ?? ''));
     }
     $sub = submission_for((int) $inst['id'], $pid);
     $v['submitted'] = (bool) $sub;
@@ -234,7 +249,7 @@ function screen_state(array $event): array
     }
     $inst = instance_by_id($slide['instance_id']);
     $cfg = $inst['config'];
-    $s = ['id' => $slide['id'], 'kind' => $slide['kind'], 'module' => $inst['module'], 'title' => $inst['title'],
+    $s = ['id' => $slide['id'], 'instance_id' => (int) $inst['id'], 'kind' => $slide['kind'], 'module' => $inst['module'], 'title' => $inst['title'],
           'is_open' => $inst['is_open']];
 
     if ($slide['kind'] === 'collect') {
@@ -271,6 +286,15 @@ function screen_state(array $event): array
             $s['pledge'] = $cfg['pledge'];
             $s['intro'] = $cfg['intro'];
             break;
+        case 'm5:collect':
+            // Participation only: no statement text and no ranking, so the screen doesn't steer answers.
+            $s['live'] = qf_live_stats($inst);
+            $s['min_n'] = (int) $cfg['min_n'];
+            break;
+        case 'm5:results':
+            $s['results'] = qf_results($inst);
+            $s['tab'] = max(1, min(4, (int) $cfg['tab']));
+            break;
     }
     $out['slide'] = $s;
     return $out;
@@ -304,6 +328,19 @@ function remote_action(array $event, string $action, array $in): void
         case 'open':
             q('UPDATE instances SET is_open = ? WHERE id = ? AND event_id = ?',
                 [empty($in['open']) ? 0 : 1, (int) ($in['instance_id'] ?? 0), $eid]);
+            break;
+        case 'qf_tab':
+        case 'qf_view':
+            $inst = instance_by_id((int) ($in['instance_id'] ?? 0));
+            if ($inst && $inst['module'] === 'm5' && (int) $inst['event_id'] === $eid) {
+                $cfg = $inst['config'];
+                if ($action === 'qf_tab') {
+                    $cfg['tab'] = max(1, min(4, (int) ($in['tab'] ?? 1)));
+                } elseif (in_array((string) ($in['side'] ?? ''), ['hiring', 'candidate', 'education', 'all'], true)) {
+                    $cfg['view_side'] = (string) $in['side'];
+                }
+                save_instance_config((int) $inst['id'], $cfg);
+            }
             break;
         case 'moderate':
             $status = (string) ($in['status'] ?? '');
@@ -345,6 +382,11 @@ function remote_state(array $event): array
                 return ['text' => $s['text'], 'yes' => $s['yes'], 'no' => $s['no'], 'dk' => $s['dk'], 'status' => $s['status']];
             }, $stats);
             $i['total_answers'] = array_sum(array_column($stats, 'n'));
+        } elseif ($inst['module'] === 'm5') {
+            $live = qf_live_stats($inst);
+            $i['qf'] = ['people' => $live['people'], 'by_side' => $live['by_side'], 'answers' => $live['answers'],
+                        'coverage' => $live['active'] ? round(100 * $live['reached'] / $live['active']) : 0,
+                        'tab' => (int) $inst['config']['tab'], 'side' => $inst['config']['view_side']];
         } elseif ($inst['module'] === 'm2') {
             $i['pending'] = $m2subs[(int) $inst['id']]['pending'] ?? [];
             $i['approved'] = array_reverse($m2subs[(int) $inst['id']]['approved'] ?? []);

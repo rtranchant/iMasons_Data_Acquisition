@@ -32,4 +32,4 @@ page_start('Remote – ' . $event['name'], 'remote', 'Remote · ' . $event['name
 </p>
 <?php
 page_end('<script>window.EVENT_CODE = ' . json_encode($event['code']) . '; window.CSRF = ' . json_encode(csrf_token()) . ';</script>'
-    . '<script src="assets/remote.js?v=6"></script>');
+    . '<script src="assets/remote.js?v=7"></script>');

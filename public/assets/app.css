@@ -177,3 +177,22 @@ body.has-banner main { padding-bottom: 120px; }
 /* Phone: shown when checks or answers are being retried */
 .offline-note { position: fixed; top: 0; left: 0; right: 0; z-index: 25; background: var(--amber); color: var(--ink);
   font-size: 13px; padding: 8px 16px; text-align: center; }
+
+/* Phone: quick-fire cards */
+.qf-prompt { font-weight: 600; font-size: 16px; margin: 6px 0 12px; }
+.qf-card { border: 1px solid var(--ink); border-top: 6px solid var(--lime); padding: 26px 20px; min-height: 180px; display: flex; align-items: center; }
+.qf-card p { margin: 0; font-size: clamp(21px, 6vw, 27px); font-weight: 500; line-height: 1.3; letter-spacing: -.012em; }
+.qf-buttons { display: grid; gap: 10px; margin-top: 14px; }
+.qf-buttons .btn { padding: 20px; font-size: 19px; }
+.qf-buttons .yes { background: var(--green-shade); border-color: var(--green-shade); }
+.qf-buttons .no { background: var(--red-shade); border-color: var(--red-shade); }
+.qf-buttons .dk { background: #fff; color: var(--ink); }
+.qf-hint { text-align: center; font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+.qf-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; }
+.qf-q { font-size: 21px; margin: 18px 0 10px; }
+.qf-choices { display: grid; gap: 8px; }
+.qf-choice { text-align: left; font: 500 16px/1.35 "Lexend", sans-serif; padding: 15px 14px; border: 1px solid var(--ink); background: #fff; color: var(--ink); cursor: pointer; }
+.qf-choice.on { background: var(--ink); color: #fff; box-shadow: inset 5px 0 0 var(--lime); }
+.qf-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.qf-chip { font: 400 14px "Lexend", sans-serif; padding: 9px 12px; border: 1px solid var(--grey); background: #fff; color: var(--ink); cursor: pointer; }
+.qf-chip.on { border-color: var(--ink); background: var(--tint); font-weight: 600; }

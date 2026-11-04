@@ -35,8 +35,8 @@
   // ---------------------------------------------------------------- layers (smooth page changes)
   // Each page is built in a new layer on top of the current one and faded in; the old layer is then removed.
 
-  function newLayer(eventName, withHeader) {
-    var layer = el('div', 'layer');
+  function newLayer(eventName, withHeader, light) {
+    var layer = el('div', 'layer' + (light ? ' light' : ''));
     if (withHeader) {
       add(layer, el('div', 'stripe'), add(el('header', 'top'), el('span', 'brand', 'iMasons'), el('span', 'event', eventName)));
     }
@@ -67,9 +67,11 @@
     clearTimers();
     ui = {};
     shownIsImage = false;
-    var L = newLayer(state.event, true);
+    var L = newLayer(state.event, true, s && s.module === 'm5');
     stage = L.content;
-    if (!s) {
+    if (s && s.module === 'm5') {
+      if (s.kind === 'collect') buildQfLive(state, s); else buildQfResults(s);
+    } else if (!s) {
       add(stage, add(el('div', 'hold'),
         add(el('div'), el('div', 'kicker', 'Welcome'), el('h1', null, state.event), el('p', null, 'Scan the code to join on your phone and keep the page open.')),
         qrBlock(state)));
@@ -184,6 +186,189 @@
     if (ui.rot) feedRotator(s.statements || []);
     if (ui.cols) drawResults(s);
     if (ui.slots) feedWall(s.statements || []);
+    if (ui.qfLive && s.live) drawQfLive(s.live, s.min_n);
+    if (ui.qfRes && s.results) { ui.qfRes.data = s.results; if (!ui.qfRes.until || Date.now() > ui.qfRes.until) ui.qfRes.tab = s.tab; drawQfResults(); }
+  }
+
+  // ---------------------------------------------------------------- module 5: quick-fire pages (white house style)
+
+  var QF_STAGES = ['Awareness', 'Readiness', 'Matching', 'Screening', 'Selection', 'Clearance', 'Start', 'Growth and retention'];
+  var QF_SIDES = [['hiring', 'Hiring'], ['candidate', 'Candidates'], ['education', 'Education'], ['other', 'Other']];
+  function pct(x) { return x === null || x === undefined ? '–' : Math.round(100 * x) + '%'; }
+  function pts(x) { if (x === null || x === undefined) return '–'; var r = Math.round(x); return (r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r); }
+
+  // Page A: participation only. No statement text, no ranking.
+  function buildQfLive(state, s) {
+    add(stage, el('h1', 'title', s.title));
+    var right = el('div', 'qf-live');
+    ui.qfLive = { sig: '' };
+    var people = el('section', 'qf-panel'), sides = el('div', 'qf-bars');
+    ui.qfLive.peopleNum = el('b', 'qf-big', '0');
+    add(people, el('h2', null, 'People taking part'), ui.qfLive.peopleNum, sides);
+    ui.qfLive.sides = {};
+    QF_SIDES.forEach(function (sd) {
+      var fill = el('i'), count = el('span', 'qf-count', '0');
+      add(sides, add(el('div', 'qf-bar-row'), el('span', 'qf-bar-label', sd[1]), add(el('div', 'qf-bar'), fill), count));
+      ui.qfLive.sides[sd[0]] = { fill: fill, count: count };
+    });
+    var answers = el('section', 'qf-panel');
+    ui.qfLive.answers = el('b', 'qf-big', '0'); ui.qfLive.lastMin = el('p', 'qf-sub', '');
+    add(answers, el('h2', null, 'Answers so far'), ui.qfLive.answers, ui.qfLive.lastMin);
+    var cov = el('section', 'qf-panel wide');
+    ui.qfLive.covFill = el('i'); ui.qfLive.covText = el('p', 'qf-sub', '');
+    add(cov, el('h2', null, 'Coverage'), add(el('div', 'qf-bar big'), ui.qfLive.covFill), ui.qfLive.covText);
+    var journey = el('section', 'qf-panel wide'), strip = el('div', 'qf-strip');
+    ui.qfLive.stages = {};
+    QF_STAGES.forEach(function (st) {
+      var fill = el('i'), n = el('b', 'qf-stage-n', '0');
+      add(strip, add(el('div', 'qf-stage'), add(el('div', 'qf-stage-fill'), fill), el('span', 'qf-stage-name', st), n));
+      ui.qfLive.stages[st] = { fill: fill, n: n };
+    });
+    add(journey, el('h2', null, 'Answers across the hiring journey (number of answers per stage)'), strip);
+    add(right, add(el('div', 'qf-row2'), people, answers), cov, journey);
+    add(stage, add(el('div', 'collect'), qrBlock(state), right));
+  }
+  function drawQfLive(L, minN) {
+    var sig = JSON.stringify(L);
+    if (sig === ui.qfLive.sig) return;
+    ui.qfLive.sig = sig;
+    ui.qfLive.peopleNum.textContent = String(L.people);
+    var maxSide = Math.max(1, Math.max.apply(null, QF_SIDES.map(function (sd) { return L.by_side[sd[0]] || 0; })));
+    QF_SIDES.forEach(function (sd) {
+      var n = L.by_side[sd[0]] || 0, u = ui.qfLive.sides[sd[0]];
+      u.fill.style.width = (100 * n / maxSide) + '%'; u.count.textContent = String(n);
+    });
+    ui.qfLive.answers.textContent = String(L.answers);
+    ui.qfLive.lastMin.textContent = L.last_minute + ' in the last minute';
+    var c = L.active ? L.reached / L.active : 0;
+    ui.qfLive.covFill.style.width = (100 * c) + '%';
+    ui.qfLive.covText.textContent = Math.round(100 * c) + '% of statements have ' + minN + ' or more answers (' + L.reached + ' of ' + L.active + ')';
+    var maxStage = Math.max(1, Math.max.apply(null, QF_STAGES.map(function (st) { return L.stages[st] || 0; })));
+    QF_STAGES.forEach(function (st) {
+      var n = L.stages[st] || 0, u = ui.qfLive.stages[st];
+      u.fill.style.height = (100 * n / maxStage) + '%'; u.n.textContent = String(n);
+    });
+  }
+
+  // Re-fit the results rows once the brand font has loaded (it changes line heights).
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (ui.qfRes) { ui.qfRes.sig = ''; drawQfResults(); } });
+
+  // Page B: four tabs for the panel.
+  var QF_TABS = ['Top problems', 'Where it breaks', 'Blind spots', 'Side by side'];
+  function buildQfResults(s) {
+    ui.qfRes = { tab: s.tab || 1, data: s.results, sig: '' };
+    ui.qfRes.head = el('div', 'qf-head');
+    ui.qfRes.tabs = el('div', 'qf-tabs');
+    ui.qfRes.body = el('div', 'qf-body');
+    add(stage, add(el('div', 'qf-titlebar'), el('h1', 'title qf-title', s.title), ui.qfRes.tabs), ui.qfRes.head, ui.qfRes.body);
+  }
+  function setQfTab(t, send) {
+    if (!ui.qfRes || t < 1 || t > 4) return false;
+    ui.qfRes.tab = t;
+    ui.qfRes.until = Date.now() + 2000;   // don't let an older reply switch it back
+    drawQfResults();
+    if (send && window.CSRF && currentSlide) {
+      fetch('api.php?a=qf_tab&lite=1&c=' + encodeURIComponent(code), {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF': window.CSRF },
+        body: JSON.stringify({ instance_id: currentSlide.instance_id, tab: t })
+      }).catch(function () {});
+    }
+    return true;
+  }
+  function drawQfResults() {
+    var R = ui.qfRes, d = R.data, sig = R.tab + JSON.stringify(d);
+    if (sig === R.sig) return;
+    R.sig = sig;
+    R.tabs.innerHTML = '';
+    QF_TABS.forEach(function (t, i) { add(R.tabs, el('span', 'qf-tab' + (R.tab === i + 1 ? ' on' : ''), (i + 1) + ' ' + t)); });
+    var when = d.as_of ? new Date(d.as_of.replace(' ', 'T') + 'Z') : null;
+    var stamp = when ? when.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'no answers yet';
+    var flagged = d.flag_mode === 'exclude' ? d.excluded + ' excluded as straight-liners'
+      : d.flag_mode === 'half' ? d.half + ' straight-liners at half weight' : 'straight-liners included';
+    R.head.innerHTML = '';
+    [d.side_label, d.included + ' people included', flagged, 'Data as of ' + stamp].concat(d.filter ? [d.filter] : [])
+      .forEach(function (t, i) { add(R.head, el('span', i === 0 ? 'qf-head-side' : null, t)); });
+    R.body.innerHTML = '';
+    ({ 1: qfTop, 2: qfStages, 3: qfBlind, 4: qfCompare })[R.tab](d, R.body);
+    // Drop rows that don't fit and say how many more there are.
+    var list = R.body.querySelector('.qf-list');
+    if (list) {
+      var hidden = 0;
+      while (list.scrollHeight > list.clientHeight + 2 && list.children.length > 1) { list.removeChild(list.lastChild); hidden++; }
+      if (hidden) add(R.body, el('p', 'qf-note', '+ ' + hidden + ' more not shown'));
+    }
+  }
+  function nTag(n) { return el('span', 'qf-n' + (n < 10 ? ' low' : ''), 'n ' + n + (n < 10 ? ' · low n' : '')); }
+  function qfTop(d, body) {
+    if (!d.top.length) { add(body, el('p', 'qf-empty', 'Not enough answers yet: statements appear once they have ' + d.min_n + ' Yes or No answers.')); return; }
+    var list = el('div', 'qf-list');
+    d.top.forEach(function (r) {
+      var bar = add(el('div', 'qf-ybar'), el('i')), mark = el('b', 'qf-mark');
+      bar.firstChild.style.width = (100 * r.yes_pct) + '%';
+      if (d.room_yes !== null) { mark.style.left = (100 * d.room_yes) + '%'; bar.appendChild(mark); }
+      add(list, add(el('div', 'qf-item'), el('p', 'qf-st', r.statement),
+        add(el('div', 'qf-meta'), add(el('div', 'qf-ywrap'), bar), el('span', 'qf-pct', pct(r.yes_pct) + ' Yes'), el('span', 'qf-lift', pts(r.lift)), nTag(r.n))));
+    });
+    add(body, list);
+    add(body, el('p', 'qf-note', 'Ranked by lift (+ points above these people\'s usual Yes rate). Black mark: the room\'s average Yes rate, ' + pct(d.room_yes) + '.'));
+  }
+  function qfStages(d, body) {
+    var strip = el('div', 'qf-strip results');
+    var lifts = d.stages.filter(function (s) { return s.enough; }).map(function (s) { return Math.max(0, s.lift); });
+    var maxL = Math.max(1, Math.max.apply(null, lifts.concat([1])));
+    d.stages.forEach(function (s) {
+      var b = el('div', 'qf-stage' + (s.enough ? '' : ' none'));
+      if (s.enough) b.style.background = 'rgba(196,229,0,' + (0.15 + 0.85 * Math.max(0, s.lift) / maxL).toFixed(2) + ')';
+      add(b, el('span', 'qf-stage-name', s.stage), el('span', 'qf-stage-lift', s.enough ? pts(s.lift) : 'not enough answers'));
+      add(strip, b);
+    });
+    add(body, strip);
+    var list = el('div', 'qf-list');
+    d.stages.forEach(function (s) {
+      if (!s.enough) return;
+      add(list, add(el('div', 'qf-item'), add(el('p', 'qf-st'), el('b', null, s.stage + ': '), document.createTextNode(s.top.statement)),
+        add(el('div', 'qf-meta'), el('span', 'qf-lift', pts(s.top.lift)), nTag(s.top.n))));
+    });
+    add(body, list);
+    add(body, el('p', 'qf-note', 'Each stage shows the average lift of its statements with ' + d.min_n + '+ answers, and its top statement. Stages with fewer than 3 such statements say "not enough answers".'));
+  }
+  function qfBlind(d, body) {
+    if (!d.blind.length) { add(body, el('p', 'qf-empty', 'No "Don\'t know" answers yet on statements with ' + d.min_n + '+ answers.')); return; }
+    var list = el('div', 'qf-list');
+    d.blind.forEach(function (r) {
+      var bar = add(el('div', 'qf-ybar dk'), el('i'));
+      bar.firstChild.style.width = (100 * r.dk_share) + '%';
+      add(list, add(el('div', 'qf-item'), el('p', 'qf-st', r.statement),
+        add(el('div', 'qf-meta dk'), add(el('div', 'qf-ywrap'), bar), el('span', 'qf-pct', pct(r.dk_share) + " Don't know"), el('span', 'qf-n', 'n ' + r.total))));
+    });
+    add(body, list);
+    add(body, el('p', 'qf-note', d.side === 'hiring' ? 'What employers can\'t see from where they sit.' : 'Share of "Don\'t know" among all answers to the statement.'));
+  }
+  function qfCompare(d, body) {
+    var c = d.compare;
+    if (!c.ok) {
+      add(body, add(el('div', 'qf-refuse'),
+        el('p', 'qf-st', 'Not enough candidate-side answers to compare reliably. Showing the hiring-side view only.'),
+        el('p', 'qf-sub', 'Hiring side: ' + c.hiring_n + ' people · Candidate side: ' + c.candidate_n + ' people (each side needs at least 8, and statements need ' + d.min_n + '+ answers on both sides).')));
+      return;
+    }
+    var list = el('div', 'qf-list cmp-grid'), maxAbs = 1;
+    c.rows.forEach(function (r) { maxAbs = Math.max(maxAbs, Math.abs(r.hiring_lift), Math.abs(r.candidate_lift)); });
+    function lbar(v, cls) {
+      var b = el('div', 'qf-lbar ' + cls), i = el('i');
+      var w = 50 * Math.abs(v) / maxAbs;
+      i.style.width = w + '%'; i.style.left = (v >= 0 ? 50 : 50 - w) + '%';
+      b.appendChild(i); return b;
+    }
+    c.rows.forEach(function (r) {
+      add(list, add(el('div', 'qf-item cmp'), el('p', 'qf-st', r.statement),
+        add(el('div', 'qf-cmp'),
+          add(el('div', 'qf-cmp-row'), el('span', 'qf-bar-label', 'Employers'), lbar(r.hiring_lift, 'h'), el('span', 'qf-lift sm', pts(r.hiring_lift)), el('span', 'qf-n', 'n ' + r.hiring_n)),
+          add(el('div', 'qf-cmp-row'), el('span', 'qf-bar-label', 'Candidates'), lbar(r.candidate_lift, 'c'), el('span', 'qf-lift sm', pts(r.candidate_lift)), el('span', 'qf-n', 'n ' + r.candidate_n))),
+        el('span', 'qf-gap', 'Gap ' + pts(r.gap) + ' · ' + (r.gap > 0 ? 'Candidates see it more' : 'Employers see it more'))));
+    });
+    add(body, list);
+    add(body, el('p', 'qf-note', 'Compared on lift only, never on raw % Yes. Hiring side: ' + c.hiring_n + ' people · candidate side: ' + c.candidate_n + ' people.'));
   }
 
   function drawDots(d, module) {
@@ -338,6 +523,7 @@
   var POLL_VISIBLE_MS = 400, POLL_HIDDEN_MS = 10000, MAX_BACKOFF_MS = 30000;
   var offline = document.getElementById('offline'), lastHash = '', failures = 0, pollTimer = null, polling = false, again = false;
   var preloaded = {}, nav = [], eventName = document.title.replace(/ – Screen$/, '');
+  var currentSlide = null;
   var pending = null;   // {id, until}: a slide this screen switched to itself and is waiting for the server to confirm
   function poll() {
     // A check is already on its way: run another one as soon as it returns, never skip it.
@@ -357,6 +543,7 @@
         pending = null;
         lastHash = state.h || '';
         nav = state.nav || nav;
+        currentSlide = state.slide;
         eventName = state.event || eventName;
         var key = state.slide ? state.slide.id + ':' + state.slide.kind : 'hold';
         if (key !== layoutKey) { layoutKey = key; build(state); }
@@ -442,10 +629,19 @@
   }
   document.addEventListener('keydown', function (e) {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
+    var onQfResults = ui.qfRes && currentSlide && currentSlide.module === 'm5' && currentSlide.kind === 'results';
+    if (onQfResults && /^[1-4]$/.test(e.key)) {
+      e.preventDefault();
+      if (!window.CSRF) { step('next'); return; }   // shows the log-in hint
+      setQfTab(parseInt(e.key, 10), true);
+      return;
+    }
     var action = { ArrowRight: 'next', ArrowDown: 'next', PageDown: 'next', ' ': 'next', Enter: 'next',
                    ArrowLeft: 'prev', ArrowUp: 'prev', PageUp: 'prev', Backspace: 'prev' }[e.key];
     if (!action) return;
     e.preventDefault();
+    // On the results page the clicker goes through the four tabs first, then on to the next slide.
+    if (onQfResults && window.CSRF && setQfTab(ui.qfRes.tab + (action === 'next' ? 1 : -1), true)) return;
     step(action);
   });
   document.addEventListener('click', function (e) {

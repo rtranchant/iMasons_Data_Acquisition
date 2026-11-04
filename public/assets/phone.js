@@ -60,7 +60,7 @@
     checking = true;
     lastCheck = Date.now();
     clearTimeout(nextTimer);
-    request('phone').then(function (r) {
+    request('phone' + (qf.hash ? '&qh=' + qf.hash : '')).then(function (r) {
       if (r.status === 200 && !r.data.error) {
         failures = 0;
         setOffline(false);
@@ -114,9 +114,9 @@
     clearTimeout(qTimer);
     // Answers given while the previous request was on its way go together in this one.
     var first = queue[0], take = 1, body = first.b, action = first.a;
-    if (first.a === 'm1_answer') {
+    if (first.a === 'm1_answer' || first.a === 'qf_answer') {
       var group = [];
-      while (take <= queue.length && group.length < 50 && queue[take - 1].a === 'm1_answer' && queue[take - 1].b.instance_id === first.b.instance_id) {
+      while (take <= queue.length && group.length < 50 && queue[take - 1].a === first.a && queue[take - 1].b.instance_id === first.b.instance_id) {
         group.push(queue[take - 1].b); take++;
       }
       take = group.length;
@@ -149,7 +149,8 @@
     updateBanner(st);
     var i = st.instance;
     if (i && i.module === 'm1') m1Update(i);
-    if (i && i.module !== 'm1' && local['s' + i.id]) { i.submitted = true; if (i.module === 'm2' && !i.mine) i.mine = local['s' + i.id]; }
+    if (i && i.module === 'm5') qfUpdate(i);
+    if (i && i.module !== 'm1' && i.module !== 'm5' && local['s' + i.id]) { i.submitted = true; if (i.module === 'm2' && !i.mine) i.mine = local['s' + i.id]; }
     render(false);
   }
 
@@ -157,6 +158,7 @@
     var i = state && state.instance;
     if (!i) return 'waiting';
     if (i.module === 'm1') return 'm1:' + i.id + ':' + (m1.current ? m1.current.id + '.' + m1.current.version : 'done');
+    if (i.module === 'm5') return 'm5:' + i.id + ':' + (!qf.profile ? 'profile' : qf.paused ? 'paused' : qf.current ? qf.current.id : 'done');
     return i.module + ':' + i.id + ':' + (i.submitted ? 'sent' : 'form');
   }
 
@@ -176,7 +178,7 @@
       return;
     }
     app.appendChild(el('div', { 'class': 'label txt', text: i.title }));
-    ({ m1: renderM1, m2: renderM2, m3: renderContact, m4: renderContact })[i.module](i);
+    ({ m1: renderM1, m2: renderM2, m3: renderContact, m4: renderContact, m5: renderQF })[i.module](i);
   }
 
   function checkButton() {
@@ -317,6 +319,145 @@
     var a = { ArrowRight: 'yes', ArrowLeft: 'no', ArrowDown: 'dk' }[e.key];
     if (a) { e.preventDefault(); m1Commit(a); }
   });
+
+  // ---------------------------------------------------------------- module 5: quick-fire cards
+  // Yes always means "this is a problem". Each tap is saved at once (queue) and the next card appears.
+  // Next card: not yet answered here, fewest answers in the room so far, ties at random.
+  // A check statement is slipped in after roughly every 25 cards, at most 2 per person.
+
+  var qf = { id: null, hash: '', statements: {}, order: [], counts: {}, done: {}, profile: null, paused: false,
+             current: null, sinceCheck: 0, nextCheckAt: 25, checksShown: 0 };
+
+  function qfLocalKey(id) { return 'q' + id; }
+  function qfSave() {
+    local[qfLocalKey(qf.id)] = { done: qf.done, profile: qf.profile, sinceCheck: qf.sinceCheck, nextCheckAt: qf.nextCheckAt, checksShown: qf.checksShown };
+    saveLocal();
+  }
+  function qfUpdate(i) {
+    if (qf.id !== i.id) {
+      var saved = local[qfLocalKey(i.id)] || {};
+      qf = { id: i.id, hash: '', statements: {}, order: [], counts: {}, done: saved.done || {}, profile: saved.profile || null,
+             paused: false, current: null, sinceCheck: saved.sinceCheck || 0,
+             nextCheckAt: saved.nextCheckAt || (20 + Math.floor(Math.random() * 11)), checksShown: saved.checksShown || 0 };
+    }
+    if (i.statements) {
+      qf.statements = {};
+      qf.order = [];
+      i.statements.forEach(function (s) { qf.statements[s.id] = s; qf.order.push(s.id); });
+      qf.hash = i.set_hash;
+    }
+    qf.counts = i.counts || {};
+    (i.answered || []).forEach(function (id) { if (!qf.done[id]) qf.done[id] = '?'; });
+    if (i.profile && !qf.profile) qf.profile = i.profile;
+    qf.prompt = i.prompt;
+    qf.sides = i.sides;
+    qf.segments = i.segments;
+    if (qf.current && (!qf.statements[qf.current.id] || qf.done[qf.current.id])) qf.current = null;
+    if (!qf.current) qf.current = qfPick();
+  }
+  function qfPick() {
+    var regular = [], checks = [];
+    qf.order.forEach(function (id) {
+      var s = qf.statements[id];
+      if (qf.done[id]) return;
+      (s.check ? checks : regular).push(s);
+    });
+    var checksDone = Object.keys(qf.done).filter(function (id) { return qf.statements[id] && qf.statements[id].check; }).length;
+    if (checks.length && qf.sinceCheck >= qf.nextCheckAt && Math.max(checksDone, qf.checksShown) < 2 && regular.length) {
+      return checks[Math.floor(Math.random() * checks.length)];
+    }
+    if (!regular.length) return null;
+    var min = Infinity;
+    regular.forEach(function (s) { var n = qf.counts[s.id] || 0; if (n < min) min = n; });
+    var least = regular.filter(function (s) { return (qf.counts[s.id] || 0) === min; });
+    return least[Math.floor(Math.random() * least.length)];
+  }
+
+  function renderQF(i) {
+    if (!qf.profile) return renderQFProfile(i);
+    var answered = Object.keys(qf.done).filter(function (id) { return qf.statements[id] && !qf.statements[id].check; }).length;
+    if (qf.paused) {
+      app.appendChild(el('div', { 'class': 'done' }, [
+        el('h1', { text: 'Paused' }),
+        el('p', { 'class': 'lead', text: 'Your ' + answered + ' answer' + (answered === 1 ? ' is' : 's are') + ' saved. Continue whenever you like, on this phone.' }),
+        el('button', { 'class': 'btn lime block', type: 'button', text: 'Continue', on: { click: function () { qf.paused = false; render(true); } } })
+      ]));
+      return;
+    }
+    if (!qf.current) {
+      app.appendChild(el('div', { 'class': 'done' }, [
+        el('h1', { text: 'All done – thank you!' }),
+        el('p', { 'class': 'lead', text: 'You answered ' + answered + ' statement' + (answered === 1 ? '' : 's') + '. Keep this page open: the next activity will appear here.' }),
+        checkButton()
+      ]));
+      return;
+    }
+    var s = qf.current, sent = false;
+    function answer(a) {
+      if (sent) return;
+      sent = true;
+      if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) {} }
+      qf.done[s.id] = a;
+      if (s.check) { qf.checksShown++; qf.sinceCheck = 0; qf.nextCheckAt = 20 + Math.floor(Math.random() * 11); }
+      else { qf.sinceCheck++; qf.counts[s.id] = (qf.counts[s.id] || 0) + 1; }
+      qfSave();
+      enqueue('qf_answer', { instance_id: i.id, statement_id: s.id, answer: a });
+      qf.current = qfPick();
+      render(true);
+    }
+    app.appendChild(el('p', { 'class': 'qf-prompt txt', text: qf.prompt }));
+    app.appendChild(el('div', { 'class': 'qf-card' }, [el('p', { 'class': 'txt', text: s.text })]));
+    app.appendChild(el('div', { 'class': 'qf-buttons' }, [
+      el('button', { 'class': 'btn yes', type: 'button', text: 'Yes', on: { click: function () { answer('Y'); } } }),
+      el('button', { 'class': 'btn no', type: 'button', text: 'No', on: { click: function () { answer('N'); } } }),
+      el('button', { 'class': 'btn dk', type: 'button', text: "Don't know", on: { click: function () { answer('D'); } } })
+    ]));
+    app.appendChild(el('p', { 'class': 'qf-hint', text: "Yes = it's a problem" }));
+    app.appendChild(el('div', { 'class': 'qf-foot' }, [
+      el('span', { 'class': 'counter', text: answered + ' answered' }),
+      el('button', { 'class': 'btn light sm', type: 'button', text: 'Pause', on: { click: function () { qf.paused = true; render(true); } } })
+    ]));
+  }
+
+  function renderQFProfile(i) {
+    var side = null, segment = '';
+    var sideBox = el('div', { 'class': 'qf-choices', role: 'radiogroup' });
+    (qf.sides || []).forEach(function (o) {
+      var b = el('button', { 'class': 'qf-choice', type: 'button', role: 'radio', 'aria-checked': 'false', text: o.label });
+      b.addEventListener('click', function () {
+        side = o.value;
+        Array.prototype.forEach.call(sideBox.children, function (c) { c.classList.remove('on'); c.setAttribute('aria-checked', 'false'); });
+        b.classList.add('on'); b.setAttribute('aria-checked', 'true');
+        go.disabled = false;
+      });
+      sideBox.appendChild(b);
+    });
+    var segBox = el('div', { 'class': 'qf-chips' });
+    (qf.segments || []).forEach(function (o) {
+      var b = el('button', { 'class': 'qf-chip', type: 'button', text: o });
+      b.addEventListener('click', function () {
+        var on = !b.classList.contains('on');
+        Array.prototype.forEach.call(segBox.children, function (c) { c.classList.remove('on'); });
+        if (on) b.classList.add('on');
+        segment = on ? o : '';
+      });
+      segBox.appendChild(b);
+    });
+    var go = el('button', { 'class': 'btn lime block', type: 'button', disabled: 'disabled', text: 'Start' });
+    go.addEventListener('click', function () {
+      if (!side) return;
+      qf.profile = { side: side, segment: segment };
+      qfSave();
+      enqueue('qf_profile', { instance_id: i.id, side: side, segment: segment });
+      render(true);
+    });
+    app.appendChild(el('h1', { 'class': 'qf-q', text: 'Which side are you on today?' }));
+    app.appendChild(sideBox);
+    app.appendChild(el('h2', { 'class': 'qf-q', text: 'Which describes you best?' }));
+    app.appendChild(el('p', { 'class': 'muted small', text: 'Optional' }));
+    app.appendChild(segBox);
+    app.appendChild(el('p', { style: 'margin-top:20px' }, [go]));
+  }
 
   // ---------------------------------------------------------------- forms: one short request on Send
 

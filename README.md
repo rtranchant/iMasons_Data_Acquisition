@@ -41,6 +41,16 @@ On the big screen, slides fill the screen and every page change cross-fades. Whe
 a click or →/Space/PageDown moves forward and ← /PageUp moves back (presenter clickers work too).
 Hide a slide (e.g. a placeholder) and Next/Previous skip it.
 
+5. **Quick-fire cards** – slides: *Live feedback*, *Results*. Yes / No / Don't know on short statements; Yes always
+   means "this is a problem". Statements are imported per module from CSV in the admin (`id, theme, topic, stage,
+   statement, core_set`, optional `is_check`), so the module can be reused with new statements; check statements
+   Q901–Q904 are added automatically. Phones: a two-question profile (side, optional segment), then one card at a time,
+   least-answered statements first (random ties), a check card about every 25 cards (at most 2), pause and resume.
+   *Live feedback* shows participation only (no statement text). *Results* has four tabs (keys 1–4; the clicker moves
+   through the tabs before the next slide): top problems by **lift**, where it breaks (by stage), blind spots
+   (Don't know), side by side (only with 8+ people per side and min n on both). All calculations are in
+   `qf_compute()` in `src/quickfire.php`, unit-tested by `php tests/qf_compute_test.php`.
+
 Hiding a *Live participation* slide also hides that module's results slide; Next/Previous skip hidden slides.
 
 ## Deployment

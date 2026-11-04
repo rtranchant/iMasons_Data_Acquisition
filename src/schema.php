@@ -158,4 +158,45 @@ return [
     4 => [
         "ALTER TABLE participants ADD INDEX seen_idx (seen_instance_id, last_seen)",
     ],
+
+    // Module 5, quick-fire cards. Statements belong to a module instance (and so to one event);
+    // code is the statement's own id from the CSV (Q001...). Answering twice overwrites.
+    5 => [
+        "CREATE TABLE IF NOT EXISTS qf_statements (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            instance_id INT NOT NULL,
+            code VARCHAR(20) NOT NULL,
+            theme VARCHAR(120) NOT NULL DEFAULT '',
+            topic VARCHAR(160) NOT NULL DEFAULT '',
+            stage VARCHAR(60) NOT NULL DEFAULT '',
+            statement VARCHAR(600) NOT NULL,
+            core_set TINYINT(1) NOT NULL DEFAULT 0,
+            is_check TINYINT(1) NOT NULL DEFAULT 0,
+            active TINYINT(1) NOT NULL DEFAULT 1,
+            UNIQUE KEY one_code (instance_id, code),
+            FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
+        )$engine",
+        "CREATE TABLE IF NOT EXISTS qf_participants (
+            instance_id INT NOT NULL,
+            participant_id INT NOT NULL,
+            side VARCHAR(12) NOT NULL,
+            segment VARCHAR(40) NOT NULL DEFAULT '',
+            created DATETIME NOT NULL,
+            PRIMARY KEY (instance_id, participant_id),
+            FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+            FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE
+        )$engine",
+        "CREATE TABLE IF NOT EXISTS qf_answers (
+            instance_id INT NOT NULL,
+            participant_id INT NOT NULL,
+            statement_id INT NOT NULL,
+            answer CHAR(1) NOT NULL,
+            created DATETIME NOT NULL,
+            PRIMARY KEY (participant_id, statement_id),
+            INDEX (instance_id, created),
+            FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+            FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE,
+            FOREIGN KEY (statement_id) REFERENCES qf_statements(id) ON DELETE CASCADE
+        )$engine",
+    ],
 ];

@@ -3,7 +3,7 @@
   'use strict';
   var code = window.EVENT_CODE, app = document.getElementById('app'), errBox = document.getElementById('err');
   var POLL_MS = 2000, busy = false;
-  var MOD = { m1: 'Statements', m2: 'Text input', m3: 'Collateral', m4: 'Pledge', deck: 'Slides' };
+  var MOD = { m1: 'Statements', m2: 'Text input', m3: 'Collateral', m4: 'Pledge', m5: 'Quick-fire', deck: 'Slides' };
   var STATUS = { open: ['grey', 'Collecting'], yes: ['green', 'Yes'], no: ['red', 'No'], revise: ['purple', 'Needs revision'] };
 
   function el(tag, attrs, children) {
@@ -61,7 +61,7 @@
     if (!secs) {
       app.innerHTML = '';
       secs = {};
-      ['now', 'kpis', 'approve', 'stats', 'ros'].forEach(function (n) { secs[n] = { el: el('div'), sig: null }; app.appendChild(secs[n].el); });
+      ['now', 'kpis', 'approve', 'stats', 'qf', 'ros'].forEach(function (n) { secs[n] = { el: el('div'), sig: null }; app.appendChild(secs[n].el); });
     }
     if (force) Object.keys(secs).forEach(function (n) { secs[n].sig = null; });
     var cur = null, nxt = null, inst = null;
@@ -143,6 +143,25 @@
           bar, el('div', { 'class': 'small txt', text: s.text })
         ]));
       });
+    });
+
+    // Quick-fire: live numbers, results tab and side
+    part('qf', inst && inst.module === 'm5' ? [inst.qf, cur && cur.kind] : null, function (box) {
+      if (!(inst && inst.module === 'm5')) return;
+      var q = inst.qf;
+      box.appendChild(el('div', { 'class': 'section', text: 'Quick-fire' }));
+      box.appendChild(el('p', { 'class': 'small', text: q.people + ' people (' + q.by_side.hiring + ' hiring · ' + q.by_side.candidate + ' candidate · ' +
+        q.by_side.education + ' education · ' + q.by_side.other + ' other) · ' + q.answers + ' answers · coverage ' + q.coverage + '%' }));
+      var tabs = el('div', { 'class': 'switch', style: 'margin:6px 0;flex-wrap:wrap' });
+      ['1 Top', '2 Journey', '3 Blind spots', '4 Side by side'].forEach(function (t, k) {
+        tabs.appendChild(el('button', { type: 'button', 'class': q.tab === k + 1 ? 'on' : '', text: t, on: { click: act('qf_tab', { instance_id: inst.id, tab: k + 1 }) } }));
+      });
+      var sides = el('div', { 'class': 'switch', style: 'margin:6px 0;flex-wrap:wrap' });
+      [['hiring', 'Hiring'], ['candidate', 'Candidates'], ['education', 'Education'], ['all', 'Everyone']].forEach(function (sd) {
+        sides.appendChild(el('button', { type: 'button', 'class': q.side === sd[0] ? 'on' : '', text: sd[1], on: { click: act('qf_view', { instance_id: inst.id, side: sd[0] }) } }));
+      });
+      box.appendChild(el('div', { 'class': 'small', text: 'Results tab' })); box.appendChild(tabs);
+      box.appendChild(el('div', { 'class': 'small', text: 'Results for' })); box.appendChild(sides);
     });
 
     // Run of show (only redrawn when slides, the live slide or open/closed change)
