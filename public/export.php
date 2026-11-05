@@ -23,6 +23,9 @@ foreach (event_slides((int) $event['id']) as $s) {
     $label = $s['title'] . ' – ' . $s['label'];
     if ($s['kind'] === 'image') {
         $pages[] = ['label' => $label, 'image' => $s['image']];
+    } elseif ($s['kind'] === 'video') {
+        // The video's thumbnail stands in for it (a local copy; a title page if YouTube could not be reached).
+        $pages[] = strpos((string) $s['thumb'], 'media/') === 0 ? ['label' => $label, 'image' => $s['thumb']] : ['label' => $label, 'slide' => $s['id']];
     } elseif ($s['module'] === 'm5' && $s['kind'] === 'results') {
         foreach (['Top problems', 'Where it breaks', 'Blind spots', 'Side by side'] as $t => $name) {
             $pages[] = ['label' => $label . ' – ' . $name, 'slide' => $s['id'], 'tab' => $t + 1];

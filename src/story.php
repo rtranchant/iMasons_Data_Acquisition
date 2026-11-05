@@ -47,7 +47,9 @@ function story_data(array $event): string
     $n = 0;
     foreach ($slides as $s) {
         if ($s['visible']) {
-            $out[] = '  ' . (++$n) . '. ' . ($s['kind'] === 'image' ? 'Slide "' . $s['title'] . '" ' . $s['label'] : $s['title'] . ' (' . MODULES[$s['module']]['name'] . ', ' . $s['label'] . ')');
+            $out[] = '  ' . (++$n) . '. ' . ($s['kind'] === 'image' ? 'Slide "' . $s['title'] . '" ' . $s['label']
+                : ($s['kind'] === 'video' ? 'YouTube video "' . $s['title'] . '" (' . $s['label'] . ')'
+                : $s['title'] . ' (' . MODULES[$s['module']]['name'] . ', ' . $s['label'] . ')'));
         }
     }
 

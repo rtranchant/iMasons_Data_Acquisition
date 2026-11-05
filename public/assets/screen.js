@@ -20,7 +20,11 @@
     return n;
   }
   function add(parent) { for (var i = 1; i < arguments.length; i++) if (arguments[i]) parent.appendChild(arguments[i]); return parent; }
-  function clearTimers() { timers.forEach(clearInterval); timers = []; }
+  function clearTimers() {
+    timers.forEach(clearInterval); timers = [];
+    // Leaving a video slide: stop it now, not when its page has finished fading out.
+    if (ui.yt && ui.yt.player && ui.yt.player.stopVideo) { try { ui.yt.player.stopVideo(); } catch (e) {} }
+  }
   function shuffle(a) { for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
 
   function qrBlock(state) {
@@ -69,6 +73,7 @@
   function build(state) {
     var s = state.slide;
     if (s && s.kind === 'image') return buildImage(s.image, state.event);
+    if (s && s.kind === 'video') return buildVideo(s, state.event);
     clearTimers();
     ui = {};
     shownIsImage = false;
@@ -112,6 +117,84 @@
     }
     if (img.complete && img.naturalWidth) show();
     else (img.decode ? img.decode() : Promise.resolve()).catch(function () {}).then(show);
+  }
+
+  // ---------------------------------------------------------------- YouTube video slides
+  // Full screen like an uploaded slide. Plays from the start time and pauses on the frame at the stop time
+  // (so YouTube's suggestions never appear). Browsers only allow sound once someone has clicked or pressed
+  // a key on this page; until then the video plays muted and the first click turns the sound on.
+  var ytWaiters = null;
+  function loadYouTube(done) {
+    if (window.YT && window.YT.Player) return done(true);
+    if (ytWaiters) { ytWaiters.push(done); return; }
+    ytWaiters = [done];
+    var prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = function () { if (prev) prev(); var w = ytWaiters; ytWaiters = null; w.forEach(function (f) { f(true); }); };
+    var sc = document.createElement('script');
+    sc.src = 'https://www.youtube.com/iframe_api';
+    sc.onerror = function () { var w = ytWaiters || []; ytWaiters = null; w.forEach(function (f) { f(false); }); };
+    document.head.appendChild(sc);
+  }
+  function buildVideo(s, eventName) {
+    clearTimers();
+    ui = {};
+    var cut = shownIsImage, key = layoutKey;
+    shownIsImage = true;
+    var L = newLayer(eventName, false);
+    stage = L.content;
+    var box = el('div', 'yt-box');
+    stage.appendChild(box);
+    reveal(L, cut);
+    if (PREVIEW) {   // export picture: the thumbnail and the title, no player
+      if (/^media\//.test(s.thumb || '')) { var im = el('img', 'yt-thumb'); im.src = s.thumb; im.alt = ''; box.appendChild(im); }
+      else add(box, add(el('div', 'yt-card'), el('div', 'kicker', 'Video'), el('h1', null, s.title)));
+      return;
+    }
+    var holder = el('div');
+    var note = el('div', 'yt-note');
+    note.hidden = true;
+    add(box, holder, note);
+    ui.yt = { player: null, muted: false, note: note };
+    var stopAt = s.end || null;
+    var failTimer = setTimeout(function () { if (!ui.yt || ui.yt.player) return; showNote('The video could not load. Check the internet connection of this computer.'); }, 10000);
+    function showNote(t) { note.textContent = t; note.hidden = false; }
+    loadYouTube(function (ok) {
+      if (layoutKey !== key || !ui.yt) return;   // moved on meanwhile
+      if (!ok) return showNote('The video could not load. Check the internet connection of this computer.');
+      ui.yt.player = new window.YT.Player(holder, {
+        videoId: s.youtube_id, width: '100%', height: '100%',
+        playerVars: { autoplay: 1, start: s.start || 0, end: s.end || undefined, controls: 0, rel: 0, modestbranding: 1,
+                      playsinline: 1, iv_load_policy: 3, disablekb: 1, fs: 0, cc_load_policy: 0 },
+        events: {
+          onReady: function (e) {
+            clearTimeout(failTimer);
+            e.target.playVideo();
+            // Blocked from playing with sound: play muted and say how to turn it on.
+            setTimeout(function () {
+              if (!ui.yt || ui.yt.player !== e.target) return;
+              var st = e.target.getPlayerState();
+              if (st !== 1 && st !== 3) {
+                e.target.mute(); e.target.playVideo(); ui.yt.muted = true;
+                showNote('Playing without sound: click anywhere on this screen to turn the sound on.');
+              }
+            }, 1500);
+          },
+          onError: function () { showNote('This video cannot be played here (it may be private, removed, or not allowed in other sites).'); }
+        }
+      });
+      // Pause on the last frame just before the stop time (or the end of the video).
+      timers.push(setInterval(function () {
+        var p = ui.yt && ui.yt.player;
+        if (!p || !p.getCurrentTime || p.getPlayerState() !== 1) return;
+        var end = stopAt || (p.getDuration() ? p.getDuration() - 0.4 : 0);
+        if (end && p.getCurrentTime() >= end - 0.25) p.pauseVideo();
+      }, 200));
+    });
+  }
+  function unmuteVideo() {
+    if (!ui.yt || !ui.yt.muted || !ui.yt.player) return false;
+    ui.yt.player.unMute(); ui.yt.player.setVolume(100); ui.yt.muted = false; ui.yt.note.hidden = true;
+    return true;
   }
 
   function buildCollect(state, s) {
@@ -186,7 +269,7 @@
 
   function update(state) {
     var s = state.slide;
-    if (!s || s.kind === 'image') return;
+    if (!s || s.kind === 'image' || s.kind === 'video') return;
     if (ui.closed) ui.closed.style.display = s.is_open ? 'none' : '';
     if (s.dots && ui.dots) drawDots(s.dots, s.module);
     if (s.dots && ui.rot) drawCount(s.dots);
@@ -886,6 +969,7 @@
   });
   document.addEventListener('click', function (e) {
     if (e.button !== 0 || e.target.closest('#fs, #hint, a, button')) return;
+    if (unmuteVideo()) return;   // a video playing without sound: the first click turns the sound on
     if (onQfResultsPage() && window.CSRF && setQfTab(ui.qfRes.tab + 1, true)) return;
     step('next');
   });

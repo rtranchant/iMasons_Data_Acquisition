@@ -3,7 +3,7 @@
   'use strict';
   var code = window.EVENT_CODE, app = document.getElementById('app'), errBox = document.getElementById('err');
   var POLL_MS = 2000, busy = false;
-  var MOD = { m1: 'Statements', m2: 'Text input', m3: 'Collateral', m4: 'Pledge', m5: 'Quick-fire', m6: 'Scale', m7: 'Multiple choice', m8: 'Number', deck: 'Slides' };
+  var MOD = { m1: 'Statements', m2: 'Text input', m3: 'Collateral', m4: 'Pledge', m5: 'Quick-fire', m6: 'Scale', m7: 'Multiple choice', m8: 'Number', deck: 'Slides', video: 'Video' };
   var STATUS = { open: ['grey', 'Collecting'], yes: ['green', 'Yes'], no: ['red', 'No'], revise: ['purple', 'Needs revision'] };
 
   function el(tag, attrs, children) {

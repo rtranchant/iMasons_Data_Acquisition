@@ -341,3 +341,12 @@ body:has(.layer.in .qf-tabs) .fs { right: auto; left: 12px; }
 .preview .fs, .preview .offline, .preview .hint { display: none !important; }
 .preview .layer, .preview .card, .preview .answer-text, .preview .dot { transition: none !important; animation: none !important; }
 .preview body { cursor: default; }
+
+/* YouTube video slides: full screen, clicks and keys go to the page (next slide), not to the player */
+.yt-box { position: absolute; inset: 0; background: #000; }
+.yt-box iframe, .yt-box > div:first-child { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; }
+.yt-thumb { width: 100%; height: 100%; object-fit: contain; display: block; }
+.yt-card { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding: 0 8vw; background: var(--ink); }
+.yt-card h1 { font-size: clamp(40px, 5vw, 110px); font-weight: 600; margin: 0; line-height: 1.1; }
+.yt-note { position: absolute; left: 50%; bottom: 4vh; transform: translateX(-50%); background: #fff; color: var(--ink); padding: 12px 20px;
+  font-size: max(18px, 1.2vw); border-left: 6px solid var(--amber); max-width: 80vw; z-index: 2; }

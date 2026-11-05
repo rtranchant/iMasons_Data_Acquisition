@@ -40,7 +40,7 @@ p.lead { color: var(--muted); font-weight: 300; margin: 0 0 20px; }
 
 /* Forms */
 label { display: block; font-weight: 500; margin: 14px 0 6px; }
-input[type=text], input[type=email], input[type=password], input[type=number], textarea, select {
+input[type=text], input[type=email], input[type=password], input[type=number], input[type=url], textarea, select {
   width: 100%; font: inherit; padding: 12px; border: 1px solid var(--ink); background: #fff; color: var(--ink);
 }
 textarea { min-height: 110px; resize: vertical; }

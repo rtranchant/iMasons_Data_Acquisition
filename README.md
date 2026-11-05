@@ -66,6 +66,16 @@ Hide a slide (e.g. a placeholder) and Next/Previous skip it.
 
 Hiding a *Live participation* slide also hides that module's results slide; Next/Previous skip hidden slides.
 
+### YouTube videos
+
+Event page → *Add a YouTube video*: paste the link, optionally a start and a stop time (`1:30`, `1:02:03`; a `?t=` in
+the link is used as the start), and place it in the run of show. On the big screen it is a full-screen page that plays
+as soon as it comes up and pauses on the frame at the stop time (no YouTube suggestions). Browsers allow sound only
+after someone has clicked or pressed a key on the big screen page, so **click once on the big screen (or press a key)
+at the start of the session**; otherwise the video plays muted and the first click turns the sound on. Phones show
+"watch the screen". The thumbnail is copied to `public/media/` for the remote, the admin and the PDF export.
+Code: `src/video.php`, `buildVideo()` in `public/assets/screen.js`.
+
 ## After the session
 
 - **Export slides** (event page → *Export slides as PDF*, `public/export.php`): a PDF with one 1920×1080 picture per

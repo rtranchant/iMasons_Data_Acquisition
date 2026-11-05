@@ -7,6 +7,7 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/quickfire.php';
 require_once __DIR__ . '/survey.php';
 require_once __DIR__ . '/story.php';
+require_once __DIR__ . '/video.php';
 
 /** How often an idle phone checks what is live (seconds). */
 const PHONE_CHECK_S = 10;
@@ -161,11 +162,13 @@ function save_instance_config(int $instanceId, array $config): void
 function event_slides(int $eventId): array
 {
     $rows = q('SELECT s.*, i.module, i.title, i.is_open,
-                      p.page_no, p.pkey, d.id AS deck_id, d.name AS deck_name
+                      p.page_no, p.pkey, d.id AS deck_id, d.name AS deck_name,
+                      v.youtube_id, v.title AS video_title, v.start_s, v.end_s
                FROM slides s
                LEFT JOIN instances i ON i.id = s.instance_id
                LEFT JOIN deck_pages p ON p.id = s.page_id
                LEFT JOIN decks d ON d.id = p.deck_id
+               LEFT JOIN videos v ON v.id = s.video_id
                WHERE s.event_id = ? ORDER BY s.position, s.id', [$eventId])->fetchAll();
     $collectHidden = [];
     foreach ($rows as $r) {
@@ -185,6 +188,16 @@ function event_slides(int $eventId): array
             $r['deck_id'] = (int) $r['deck_id'];
             $r['image'] = page_url((int) $r['page_id'], $r['pkey']);
             $r['thumb'] = page_url((int) $r['page_id'], $r['pkey'], true);
+            $r['hidden_by_parent'] = false;
+        } elseif ($r['kind'] === 'video') {
+            $r['module'] = 'video';
+            $r['title'] = $r['video_title'] !== '' ? $r['video_title'] : 'YouTube video';
+            $r['label'] = video_label($r);
+            $r['image'] = null;
+            $r['thumb'] = video_thumb_url((string) $r['youtube_id']);
+            $r['video_id'] = (int) $r['video_id'];
+            $r['start_s'] = $r['start_s'] !== null ? (int) $r['start_s'] : null;
+            $r['end_s'] = $r['end_s'] !== null ? (int) $r['end_s'] : null;
             $r['hidden_by_parent'] = false;
         } else {
             $r['label'] = MODULES[$r['module']]['slides'][$r['kind']] ?? $r['kind'];
@@ -321,10 +334,10 @@ function insert_slides(int $eventId, ?int $afterSlideId, array $newSlides): arra
         $vals = [];
         $params = [];
         foreach (array_values($newSlides) as $k => $n) {
-            $vals[] = '(?,?,?,?,?,0)';
-            array_push($params, $eventId, $n['instance_id'] ?? null, $n['page_id'] ?? null, $n['kind'], -1 - $k);
+            $vals[] = '(?,?,?,?,?,?,0)';
+            array_push($params, $eventId, $n['instance_id'] ?? null, $n['page_id'] ?? null, $n['video_id'] ?? null, $n['kind'], -1 - $k);
         }
-        q('INSERT INTO slides (event_id, instance_id, page_id, kind, position, hidden) VALUES ' . implode(',', $vals), $params);
+        q('INSERT INTO slides (event_id, instance_id, page_id, video_id, kind, position, hidden) VALUES ' . implode(',', $vals), $params);
         $ids = array_map('intval', q('SELECT id FROM slides WHERE event_id = ? AND position < 0 ORDER BY position DESC', [$eventId])->fetchAll(PDO::FETCH_COLUMN));
     }
     $order = [];

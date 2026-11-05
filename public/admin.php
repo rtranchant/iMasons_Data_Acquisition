@@ -100,6 +100,33 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
             }
             redirect($back . '#ros');
 
+        case 'add_video':
+        case 'edit_video':
+            [$v, $err] = video_from_post($_POST);
+            if ($err) {
+                flash($err);
+                redirect($back . '#videos');
+            }
+            if ($do === 'add_video') {
+                q('INSERT INTO videos (event_id, youtube_id, url, title, start_s, end_s, created_at) VALUES (?,?,?,?,?,?,UTC_TIMESTAMP())',
+                    [$eventId, $v['youtube_id'], $v['url'], $v['title'], $v['start_s'], $v['end_s']]);
+                $vid = (int) db()->lastInsertId();
+                $after = ($_POST['after_slide_id'] ?? '') === '' ? null : (int) $_POST['after_slide_id'];
+                insert_slides($eventId, $after, [['kind' => 'video', 'video_id' => $vid]]);
+                flash('Video added to the run of show.');
+            } else {
+                q('UPDATE videos SET youtube_id = ?, url = ?, title = ?, start_s = ?, end_s = ? WHERE id = ? AND event_id = ?',
+                    [$v['youtube_id'], $v['url'], $v['title'], $v['start_s'], $v['end_s'], (int) ($_POST['video_id'] ?? 0), $eventId]);
+                flash('Video saved.');
+            }
+            video_fetch_thumb($v['youtube_id']);
+            redirect($back . '#videos');
+
+        case 'delete_video':
+            q('DELETE FROM videos WHERE id = ? AND event_id = ?', [(int) ($_POST['video_id'] ?? 0), $eventId]);
+            flash('Video removed from the run of show.');
+            redirect($back . '#videos');
+
         case 'delete_deck':
             $gone = q('SELECT p.id, p.pkey FROM deck_pages p JOIN decks d ON d.id = p.deck_id WHERE d.id = ? AND d.event_id = ?', [(int) ($_POST['deck_id'] ?? 0), $eventId])->fetchAll();
             q('DELETE FROM decks WHERE id = ? AND event_id = ?', [(int) ($_POST['deck_id'] ?? 0), $eventId]);
@@ -355,8 +382,9 @@ if (isset($_GET['instance'])) {
 
 function module_badge(string $module): string
 {
-    $colors = ['m1' => '', 'm2' => 'purple', 'm3' => 'green', 'm4' => 'pink', 'm5' => 'red', 'm6' => 'teal', 'm7' => 'teal', 'm8' => 'teal', 'deck' => 'grey'];
-    return '<span class="badge ' . $colors[$module] . '">' . h($module === 'deck' ? 'Slides' : MODULES[$module]['short']) . '</span>';
+    $colors = ['m1' => '', 'm2' => 'purple', 'm3' => 'green', 'm4' => 'pink', 'm5' => 'red', 'm6' => 'teal', 'm7' => 'teal', 'm8' => 'teal', 'deck' => 'grey', 'video' => 'red'];
+    $name = ['deck' => 'Slides', 'video' => 'Video'][$module] ?? MODULES[$module]['short'];
+    return '<span class="badge ' . $colors[$module] . '">' . h($name) . '</span>';
 }
 
 function position_options(array $slides): string
@@ -434,7 +462,7 @@ function render_event(int $id, ?string $msg): void
     <div class="section">Upload slides</div>
     <div class="box" id="uploader" data-event="<?= $id ?>">
       <p class="muted small" style="margin-top:0">In PowerPoint choose <b>File → Save As → PDF</b> (or File → Export → PNG) and upload the result.
-        Each page becomes a slide you can place between the data collection pages. Animations and videos are not carried over.</p>
+        Each page becomes a slide you can place between the data collection pages. Animations and embedded videos are not carried over: add YouTube videos with the box below.</p>
       <div class="grid2">
         <div><label for="up-file">PDF, or PNG/JPG images</label>
           <input type="file" id="up-file" accept="application/pdf,image/png,image/jpeg" multiple></div>
@@ -445,6 +473,21 @@ function render_event(int $id, ?string $msg): void
       <p><button class="btn" type="button" id="up-go">Upload slides</button></p>
       <div id="up-status" class="small" aria-live="polite"></div>
     </div>
+
+    <div class="section">Add a YouTube video</div>
+    <form method="post" class="box">
+      <?= csrf_field() ?><input type="hidden" name="do" value="add_video"><input type="hidden" name="event_id" value="<?= $id ?>">
+      <p class="muted small" style="margin-top:0">The video is shown full screen like a slide and starts playing as soon as its page comes up.
+        Leave the times empty to play the whole video.</p>
+      <div class="grid2">
+        <div><label for="yt-url">YouTube link</label><input type="url" id="yt-url" name="url" placeholder="https://www.youtube.com/watch?v=…" required></div>
+        <div><label for="yt-title">Name (optional)</label><input type="text" id="yt-title" name="title" placeholder="Shown in the run of show and on the remote"></div>
+        <div><label for="yt-start">Start at (optional)</label><input type="text" id="yt-start" name="start" placeholder="e.g. 1:30" inputmode="numeric"></div>
+        <div><label for="yt-end">Stop at (optional)</label><input type="text" id="yt-end" name="end" placeholder="e.g. 2:45" inputmode="numeric"></div>
+        <div><label for="yt-after">Place in the run of show</label><select id="yt-after" name="after_slide_id"><?= position_options($slides) ?></select></div>
+      </div>
+      <p><button class="btn" type="submit">Add video</button></p>
+    </form>
 
     <div class="section">Add a data collection module</div>
     <form method="post" class="box">
@@ -489,6 +532,8 @@ function render_event(int $id, ?string $msg): void
               <button class="btn light sm"><?= $s['hidden'] ? 'Show' : 'Hide' ?></button></form>
             <?php if ($s['kind'] === 'image'): ?>
               <a class="btn light sm" href="#decks">Deck</a>
+            <?php elseif ($s['kind'] === 'video'): ?>
+              <a class="btn light sm" href="#video-<?= (int) $s['video_id'] ?>">Edit</a>
             <?php else: ?>
               <a class="btn light sm" href="admin.php?instance=<?= $s['instance_id'] ?>">Edit</a>
             <?php endif; ?>
@@ -496,6 +541,31 @@ function render_event(int $id, ?string $msg): void
         </div>
       <?php endforeach; ?>
       </div>
+    <?php endif; ?>
+
+    <?php $videos = event_videos($id); if ($videos): ?>
+    <div class="section" id="videos">Videos</div>
+    <div class="list">
+      <?php foreach ($videos as $v): ?>
+      <form method="post" class="row" id="video-<?= (int) $v['id'] ?>" style="flex-wrap:wrap">
+        <?= csrf_field() ?><input type="hidden" name="do" value="edit_video"><input type="hidden" name="event_id" value="<?= $id ?>"><input type="hidden" name="video_id" value="<?= (int) $v['id'] ?>">
+        <img class="thumb" src="<?= h(video_thumb_url($v['youtube_id'])) ?>" alt="" loading="lazy">
+        <div class="grow" style="min-width:260px">
+          <div class="grid2">
+            <div><label>YouTube link</label><input type="url" name="url" value="<?= h($v['url']) ?>" required></div>
+            <div><label>Name</label><input type="text" name="title" value="<?= h($v['title']) ?>"></div>
+            <div><label>Start at</label><input type="text" name="start" value="<?= h(yt_fmt_time($v['start_s'] !== null ? (int) $v['start_s'] : null)) ?>" placeholder="beginning"></div>
+            <div><label>Stop at</label><input type="text" name="end" value="<?= h(yt_fmt_time($v['end_s'] !== null ? (int) $v['end_s'] : null)) ?>" placeholder="end of the video"></div>
+          </div>
+        </div>
+        <div class="actions" style="align-self:flex-end">
+          <button class="btn sm" type="submit">Save</button>
+          <a class="btn light sm" href="https://www.youtube.com/watch?v=<?= h($v['youtube_id']) ?><?= $v['start_s'] ? '&t=' . (int) $v['start_s'] . 's' : '' ?>" target="_blank" rel="noopener">Open on YouTube</a>
+          <button class="btn danger sm" type="submit" name="do" value="delete_video" formnovalidate onclick="return confirm('Remove this video from the run of show?')">Delete</button>
+        </div>
+      </form>
+      <?php endforeach; ?>
+    </div>
     <?php endif; ?>
 
     <?php $decks = event_decks($id); if ($decks): ?>

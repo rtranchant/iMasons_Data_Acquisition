@@ -285,6 +285,11 @@ function screen_state(array $event): array
         $out['slide'] = ['id' => $slide['id'], 'kind' => 'image', 'module' => 'deck', 'title' => $slide['title'], 'image' => $slide['image']];
         return $out;
     }
+    if ($slide['kind'] === 'video') {
+        $out['slide'] = ['id' => $slide['id'], 'kind' => 'video', 'module' => 'video', 'title' => $slide['title'],
+                         'youtube_id' => $slide['youtube_id'], 'start' => $slide['start_s'], 'end' => $slide['end_s'], 'thumb' => $slide['thumb']];
+        return $out;
+    }
     $inst = instance_by_id($slide['instance_id']);
     $cfg = $inst['config'];
     $s = ['id' => $slide['id'], 'instance_id' => (int) $inst['id'], 'kind' => $slide['kind'], 'module' => $inst['module'], 'title' => $inst['title'],

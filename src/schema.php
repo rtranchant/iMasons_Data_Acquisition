@@ -232,4 +232,22 @@ return [
     8 => [
         "ALTER TABLE qf_answers ADD INDEX inst_stmt (instance_id, statement_id, answer)",
     ],
+
+    // YouTube videos in the run of show (one slide of kind 'video' each).
+    9 => [
+        "CREATE TABLE IF NOT EXISTS videos (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            event_id INT NOT NULL,
+            youtube_id VARCHAR(11) NOT NULL,
+            url VARCHAR(500) NOT NULL,
+            title VARCHAR(200) NOT NULL DEFAULT '',
+            start_s INT NULL,
+            end_s INT NULL,
+            created_at DATETIME NOT NULL,
+            INDEX (event_id),
+            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        )$engine",
+        "ALTER TABLE slides ADD COLUMN video_id INT NULL,
+            ADD CONSTRAINT fk_slide_video FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE",
+    ],
 ];
