@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/../src/model.php';
+set_exception_handler('page_error_handler');
 require __DIR__ . '/../src/layout.php';
 
 if (isset($_GET['out'])) {

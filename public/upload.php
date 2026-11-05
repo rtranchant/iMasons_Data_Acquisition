@@ -7,6 +7,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/../src/model.php';
+set_exception_handler('page_error_handler');
 
 const MAX_PAGE_BYTES = 8 * 1024 * 1024;
 const MAX_PAGES = 300;

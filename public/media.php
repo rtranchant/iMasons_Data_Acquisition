@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/../src/bootstrap.php';
+set_exception_handler('page_error_handler');
 
 $id = (int) ($_GET['p'] ?? 0);
 $key = (string) ($_GET['k'] ?? '');

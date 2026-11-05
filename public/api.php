@@ -57,6 +57,10 @@ try {
     }
 } catch (Throwable $e) {
     error_log('[imasons api] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    if (db_busy_error($e)) {
+        header('Retry-After: 3');
+        json_out(['error' => 'busy'], 503);   // phones, screen and remote all wait and try again
+    }
     json_out(['error' => 'server_error'], 500);
 }
 

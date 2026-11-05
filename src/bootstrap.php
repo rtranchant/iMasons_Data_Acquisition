@@ -31,6 +31,14 @@ function app_config(): array
     return $config;
 }
 
+/** MySQL errors that mean "the database server is full right now, try again in a moment". */
+function db_busy_error(Throwable $e): bool
+{
+    // 1040: the server's connection limit (shared by every site on that database server)
+    // 1203 / 1226: this account's own connection limit
+    return $e instanceof PDOException && preg_match('/\[(1040|1203|1226)\]/', $e->getMessage()) === 1;
+}
+
 function db(): PDO
 {
     static $pdo = null;
@@ -40,14 +48,59 @@ function db(): PDO
         // The database is on another server, so every round trip counts:
         // emulated prepares send each query in ONE round trip (native prepares need two or three),
         // and no session setup query is needed (all times use UTC_TIMESTAMP()).
-        $pdo = new PDO($dsn, $c['user'], $c['password'], [
+        $opts = [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES   => true,
             PDO::ATTR_STRINGIFY_FETCHES  => false,
-        ]);
+            PDO::ATTR_TIMEOUT            => 5,
+        ];
+        // When the database server is full, a slot usually frees up within a second:
+        // try again a few times (0.1 + 0.2 + 0.4 + 0.8 s) before giving up.
+        $waits = [100, 200, 400, 800];
+        for ($try = 0; ; $try++) {
+            try {
+                $pdo = new PDO($dsn, $c['user'], $c['password'], $opts);
+                if ($try > 0) {
+                    error_log('[imasons db] connected after ' . $try . ' retr' . ($try === 1 ? 'y' : 'ies') . ' (database server was full)');
+                }
+                break;
+            } catch (PDOException $e) {
+                if (!db_busy_error($e) || $try >= count($waits)) {
+                    throw $e;
+                }
+                usleep($waits[$try] * 1000);
+            }
+        }
     }
     return $pdo;
+}
+
+/** Pages (not the JSON API): a clear message instead of a blank error page when the database is full. */
+function page_error_handler(Throwable $e): void
+{
+    error_log('[imasons page] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    if (!headers_sent()) {
+        http_response_code(db_busy_error($e) ? 503 : 500);
+        header('Content-Type: text/html; charset=utf-8');
+        header('Retry-After: 5');
+    }
+    $post = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST';
+    $busy = db_busy_error($e);
+    echo '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">';
+    if ($busy && !$post) {
+        echo '<meta http-equiv="refresh" content="5">';
+    }
+    echo '<title>One moment</title><body style="font:18px/1.5 system-ui,sans-serif;max-width:560px;margin:15vh auto;padding:0 20px">';
+    if ($busy) {
+        echo '<h1 style="font-size:26px">The database is busy for a moment</h1>';
+        echo $post
+            ? '<p>Your change was <b>not saved</b>. Go back and send it again in a few seconds.</p><p><a href="javascript:history.back()">Go back</a></p>'
+            : '<p>This page will try again by itself in 5 seconds.</p>';
+    } else {
+        echo '<h1 style="font-size:26px">Something went wrong</h1><p>Please reload the page. If it keeps happening, check the server error log.</p>';
+    }
+    echo '</body>';
 }
 
 /** Run a query with parameters and return the statement. */

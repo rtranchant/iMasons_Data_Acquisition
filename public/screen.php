@@ -4,6 +4,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/../src/model.php';
+set_exception_handler('page_error_handler');
 
 migrate();
 $event = event_by_code((string) ($_GET['c'] ?? ''));
