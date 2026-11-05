@@ -287,3 +287,52 @@ body:has(.layer.in .qf-tabs) .fs { right: auto; left: 12px; }
 /* Text input answers can be up to 3000 characters: keep long ones from pushing the screen layout out. */
 .rotator q { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; overflow-wrap: anywhere; }
 .card p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 7; overflow: hidden; overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------- survey answers (scale, multiple choice, number) */
+.title.sv-q { margin-bottom: 1.2vh; white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.sv-head { flex: none; font-size: max(24px, 1.4vw); color: var(--grey); font-weight: 300; margin-bottom: 3vh; }
+.sv-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sv-empty { color: var(--muted); font-weight: 300; font-size: max(28px, 2vw); margin: 0; }
+
+.sv-tiles { flex: none; display: grid; grid-template-columns: 1.4fr repeat(4, 1fr); gap: 1.6vw; margin-bottom: 5vh; }
+.sv-tile { border-top: .6vh solid var(--grey); padding-top: 1.4vh; min-width: 0; }
+.sv-tile.avg { border-color: var(--white); }
+.sv-tile.box { border-color: var(--lime); }
+.sv-tile b { display: block; overflow: hidden; font-size: clamp(48px, 4.6vw, 104px); font-weight: 600; line-height: 1; letter-spacing: -.01em; white-space: nowrap; }
+.sv-tile.avg b { font-size: clamp(64px, 6.4vw, 140px); }
+.sv-tile b small { font-size: max(24px, .4em); font-weight: 400; color: var(--grey); margin-left: .2em; }
+.sv-tile span { display: block; font-size: max(24px, 1.35vw); color: var(--grey); margin-top: 1vh; }
+
+.sv-chart { flex: none; position: relative; }
+.sv-labels { position: relative; height: max(44px, 3vw); }
+.sv-labels.above { margin-bottom: .6vh; }
+.sv-label { position: absolute; top: 0; white-space: nowrap; font-size: max(28px, 2vw); font-weight: 600; color: var(--grey); line-height: 1.3; }
+.sv-label.avg { color: var(--white); font-size: max(32px, 2.4vw); }
+.sv-label.box { color: var(--lime); }
+.sv-track { position: relative; height: max(72px, 9vh); margin: 0 0 1vh; }
+.sv-track i { position: absolute; display: block; }
+.sv-whisker { top: 50%; height: 6px; margin-top: -3px; background: var(--grey); }
+.sv-cap { top: 18%; bottom: 18%; width: 6px; margin-left: -3px; background: var(--grey); }
+.sv-box { top: 0; bottom: 0; min-width: 8px; background: var(--lime); }
+.sv-mean { top: -12%; bottom: -12%; width: 10px; margin-left: -5px; background: var(--white); box-shadow: 0 0 0 4px var(--ink); }
+.sv-axis { position: relative; height: max(40px, 2.6vw); border-top: 2px solid var(--line); margin-top: 1.5vh; }
+.sv-tick { position: absolute; top: 8px; transform: translateX(-50%); font-size: max(24px, 1.3vw); color: var(--muted); white-space: nowrap; }
+.sv-tick::before { content: ""; position: absolute; left: 50%; top: -14px; width: 2px; height: 10px; background: var(--line); }
+.sv-ends { display: flex; justify-content: space-between; font-size: max(24px, 1.4vw); color: var(--grey); margin-top: 1vh; }
+
+.sv-list { --k: 1; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: calc(1.8vh * var(--k)); }
+.sv-row { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2vw; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: calc(1.6vh * var(--k)); }
+.sv-opt { font-size: max(24px, calc(2.3vw * var(--k))); font-weight: 400; line-height: 1.2; margin-bottom: 1vh; white-space: pre-line; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.sv-bar { height: max(10px, 1.2vh); background: var(--line); }
+.sv-bar i { display: block; height: 100%; background: var(--lime); min-width: 4px; }
+.sv-row.other .sv-bar i { background: var(--amber); }
+.sv-count { display: flex; align-items: baseline; justify-content: flex-end; gap: 1vw; min-width: 12vw; }
+.sv-count b { font-size: max(48px, calc(3.8vw * var(--k))); font-weight: 600; line-height: 1; }
+.sv-count span { font-size: max(24px, 1.3vw); color: var(--grey); min-width: 3.2em; text-align: right; }
+.sv-more { flex: none; font-size: max(24px, 1.3vw); color: var(--muted); }
+.sv-others { flex: none; max-height: 30vh; display: flex; flex-direction: column; margin-top: 2.4vh; border-top: .5vh solid var(--amber); padding-top: 1.6vh; min-height: 0; }
+.sv-others-title { font-size: max(24px, 1.5vw); font-weight: 600; margin-bottom: 1.2vh; }
+.sv-chips { min-height: 0; flex: 1; overflow: hidden; display: flex; flex-wrap: wrap; gap: 1vw; align-content: flex-start; }
+.sv-chip { font-size: max(24px, 1.5vw); border: 1px solid var(--line); border-left: .4vw solid var(--amber); padding: .8vh 1vw; max-width: 100%; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }

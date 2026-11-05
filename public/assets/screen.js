@@ -77,6 +77,8 @@
         qrBlock(state)));
     } else if (s.kind === 'collect') {
       if (s.module === 'm2') buildAnswers(state, s); else buildCollect(state, s);
+    } else if (s.kind === 'results' && SV[s.module]) {
+      buildSv(s);
     } else if (s.kind === 'results') {
       buildResults(s);
     } else if (s.kind === 'wall') {
@@ -114,6 +116,7 @@
     add(live, ui.closed);
     if (s.module === 'm4') add(live, el('div', 'pledge', s.pledge));
     if (s.module === 'm3') add(live, el('div', 'intro', s.intro));
+    if (SV[s.module]) add(live, el('div', 'prompt-big', s.prompt));
     if (s.module === 'm1') {
       ui.num = el('b', null, '0');
       add(live, add(el('div', 'bignum'), ui.num, el('span', null, 'statements answered by the room')));
@@ -187,8 +190,149 @@
     if (ui.cols) drawResults(s);
     if (ui.slots) feedWall(s.statements || []);
     if (ui.qfLive && s.live) drawQfLive(s.live, s.min_n);
+    if (ui.sv && s.results) drawSv(s);
     if (ui.qfRes && s.results) { ui.qfRes.data = s.results; if (!ui.qfRes.until || Date.now() > ui.qfRes.until) ui.qfRes.tab = s.tab; drawQfResults(); }
   }
+
+  // ---------------------------------------------------------------- survey answers: scale, multiple choice, number
+
+  var SV = { m6: true, m7: true, m8: true };
+
+  function fmtNum(x, d) {
+    if (x === null || x === undefined || isNaN(x)) return '–';
+    return Number(x).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: 0 }).replace('-', '−');
+  }
+
+  function buildSv(s) {
+    add(stage, el('div', 'kicker', s.title), el('h1', 'title sv-q', s.prompt));
+    ui.sv = { sig: '', module: s.module, head: el('div', 'sv-head'), body: el('div', 'sv-body') };
+    add(stage, ui.sv.head, ui.sv.body);
+  }
+
+  function drawSv(s) {
+    var R = s.results, sig = JSON.stringify(R) + '|' + root.clientWidth + 'x' + root.clientHeight;
+    ui.sv.last = s;
+    if (sig === ui.sv.sig) return;
+    ui.sv.sig = sig;
+    ui.sv.body.innerHTML = '';
+    var n = s.module === 'm7' ? R.people : R.stats.n;
+    ui.sv.head.textContent = (n === 1 ? '1 answer' : n + ' answers') + (s.module === 'm7' && R.multi ? ' · people could pick more than one' : '') +
+      (s.module === 'm8' && R.unit ? ' · in ' + R.unit : '');
+    if (!n) { add(ui.sv.body, el('p', 'sv-empty', 'Answers will appear here as they come in.')); return; }
+    if (s.module === 'm7') svChoices(R, ui.sv.body); else svCandle(R, ui.sv.body, s.module);
+  }
+
+  // Scale and number: five numbers in large type, then a horizontal candlestick:
+  // whisker = lowest to highest answer, box = 10th to 90th percentile, white line = average.
+  function svCandle(R, body, module) {
+    var st = R.stats, d = module === 'm6' ? 1 : Math.min(3, (R.decimals || 0) + 1);
+    var unit = R.unit ? ' ' + R.unit : '';
+    var tiles = el('div', 'sv-tiles');
+    [['mean', 'Average', 'avg'], ['min', 'Lowest', ''], ['p10', '10th percentile', 'box'], ['p90', '90th percentile', 'box'], ['max', 'Highest', '']].forEach(function (t) {
+      add(tiles, add(el('div', 'sv-tile ' + t[2]), el('b', null, fmtNum(st[t[0]], d)), el('span', null, t[1])));
+    });
+    add(body, tiles);
+    // Very long numbers: smaller type until each fits its tile (never under 40px).
+    Array.prototype.forEach.call(tiles.querySelectorAll('b'), function (b) {
+      for (var fs = parseFloat(getComputedStyle(b).fontSize); b.scrollWidth > b.clientWidth + 1 && fs > 40; fs -= 4) b.style.fontSize = fs + 'px';
+    });
+
+    // Axis range: the whole scale; for numbers, the answers' range with a margin, kept inside the limits set.
+    var lo, hi;
+    if (module === 'm6') { lo = R.min; hi = R.max; }
+    else {
+      var span = st.max - st.min, pad = span ? span * 0.08 : Math.max(1, Math.abs(st.max) * 0.1);
+      lo = st.min - pad; hi = st.max + pad;
+      if (R.min !== null && R.min !== undefined) lo = Math.max(lo, R.min);
+      if (R.max !== null && R.max !== undefined) hi = Math.min(hi, R.max);
+      if (hi <= lo) { hi = lo + 1; }
+    }
+    var X = function (v) { return 100 * (v - lo) / (hi - lo); };
+    var chart = el('div', 'sv-chart'), above = el('div', 'sv-labels above'), track = el('div', 'sv-track'),
+        below1 = el('div', 'sv-labels'), below2 = el('div', 'sv-labels'), axis = el('div', 'sv-axis');
+    var whisk = el('i', 'sv-whisker'); whisk.style.left = X(st.min) + '%'; whisk.style.width = Math.max(0, X(st.max) - X(st.min)) + '%';
+    var capL = el('i', 'sv-cap'); capL.style.left = X(st.min) + '%';
+    var capR = el('i', 'sv-cap'); capR.style.left = X(st.max) + '%';
+    var box = el('i', 'sv-box'); box.style.left = X(st.p10) + '%'; box.style.width = Math.max(0, X(st.p90) - X(st.p10)) + '%';
+    var mean = el('i', 'sv-mean'); mean.style.left = X(st.mean) + '%';
+    add(track, whisk, capL, capR, box, mean);
+    function label(row, v, text, cls) { var l = el('span', 'sv-label ' + (cls || ''), text); l.dataset.x = X(v); row.appendChild(l); }
+    label(above, st.mean, fmtNum(st.mean, d) + unit, 'avg');
+    label(below1, st.p10, fmtNum(st.p10, d), 'box');
+    label(below1, st.p90, fmtNum(st.p90, d), 'box');
+    label(below2, st.min, fmtNum(st.min, d), '');
+    label(below2, st.max, fmtNum(st.max, d), '');
+    // Axis ticks: every point of a short scale, otherwise about six round numbers.
+    var ticks = [];
+    if (module === 'm6' && hi - lo <= 10) { for (var t = lo; t <= hi; t++) ticks.push(t); }
+    else {
+      var raw = (hi - lo) / 5, mag = Math.pow(10, Math.floor(Math.log10(raw))), stepV = [1, 2, 2.5, 5, 10].map(function (m) { return m * mag; }).filter(function (m) { return m >= raw; })[0];
+      for (var v = Math.ceil(lo / stepV) * stepV; v <= hi + 1e-9; v += stepV) ticks.push(v);
+    }
+    ticks.forEach(function (t) { var k = el('span', 'sv-tick', fmtNum(t, 3)); k.style.left = X(t) + '%'; axis.appendChild(k); });
+    add(chart, above, track, below1, below2, axis);
+    if (module === 'm6' && (R.low_label || R.high_label)) add(chart, add(el('div', 'sv-ends'), el('span', null, R.low_label || ''), el('span', null, R.high_label || '')));
+    add(body, chart);
+    [above, below1, below2].forEach(placeLabels);
+  }
+
+  // Put each label centred on its value, pushing neighbours apart so they never overlap.
+  function placeLabels(row) {
+    var W = row.clientWidth, gap = 24, ls = Array.prototype.slice.call(row.children);
+    var items = ls.map(function (l) { return { l: l, w: l.offsetWidth, c: W * l.dataset.x / 100 }; }).sort(function (a, b) { return a.c - b.c; });
+    items.forEach(function (it, i) {
+      it.left = Math.max(0, Math.min(W - it.w, it.c - it.w / 2));
+      if (i && it.left < items[i - 1].left + items[i - 1].w + gap) it.left = items[i - 1].left + items[i - 1].w + gap;
+    });
+    for (var i = items.length - 1; i >= 0; i--) {
+      var maxLeft = i === items.length - 1 ? W - items[i].w : items[i + 1].left - gap - items[i].w;
+      if (items[i].left > maxLeft) items[i].left = Math.max(0, maxLeft);
+    }
+    items.forEach(function (it) { it.l.style.left = it.left + 'px'; });
+  }
+
+  // Multiple choice: most chosen first, with the number of people who chose each option.
+  // Approved "Other" texts are listed underneath.
+  function svChoices(R, body) {
+    var max = Math.max(1, Math.max.apply(null, R.choices.map(function (c) { return c.count; })));
+    var list = el('div', 'sv-list'), wrap = null;
+    R.choices.forEach(function (c) {
+      var bar = el('i'); bar.style.width = (100 * c.count / max) + '%';
+      var pctTxt = R.people ? Math.round(100 * c.count / R.people) + '%' : '';
+      add(list, add(el('div', 'sv-row' + (c.other ? ' other' : '')),
+        add(el('div', 'sv-row-main'), el('div', 'sv-opt', c.label), add(el('div', 'sv-bar'), bar)),
+        add(el('div', 'sv-count'), el('b', null, String(c.count)), el('span', null, pctTxt))));
+    });
+    add(body, list);
+    if (R.other_texts && R.other_texts.length) {
+      var box = el('div', 'sv-others');
+      add(box, el('div', 'sv-others-title', (R.choices.filter(function (c) { return c.other; })[0] || { label: 'Other' }).label + ' answers'));
+      wrap = el('div', 'sv-chips');
+      R.other_texts.forEach(function (t) { add(wrap, el('span', 'sv-chip', t)); });
+      add(box, wrap);
+      add(body, box);
+    }
+    // Short screens: the standard answers come first, so drop "Other" texts (keeping one) before shrinking them.
+    var overflowing = function () { return list.scrollHeight > list.clientHeight + 1; };
+    if (wrap) { while (overflowing() && wrap.children.length > 1) wrap.removeChild(wrap.lastChild); }
+    // Long option lists: make the rows smaller (never under 24px text) until they fit, then hide what is left.
+    var steps = [1, 0.85, 0.72, 0.62];
+    for (var k = 0; k < steps.length; k++) {
+      list.style.setProperty('--k', steps[k]);
+      if (list.scrollHeight <= list.clientHeight + 1) break;
+    }
+    var rows = list.children, hidden = 0;
+    while (list.scrollHeight > list.clientHeight + 1 && rows.length > 1) { list.removeChild(rows[rows.length - 1]); hidden++; }
+    if (hidden) {
+      list.removeChild(rows[rows.length - 1]); hidden++;
+      add(list, el('div', 'sv-more', '+ ' + hidden + ' more option' + (hidden > 1 ? 's' : '') + ' with fewer answers'));
+    }
+    // Other texts: keep only the chips that fit.
+    if (wrap) { while (wrap.scrollHeight > wrap.clientHeight + 1 && wrap.children.length > 1) wrap.removeChild(wrap.lastChild); }
+  }
+  function svRefit() { if (ui.sv && ui.sv.last) { ui.sv.sig = ''; drawSv(ui.sv.last); } }
+  window.addEventListener('resize', function () { setTimeout(svRefit, 350); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(svRefit);
 
   // ---------------------------------------------------------------- module 5: quick-fire pages (white house style)
 
@@ -459,7 +603,7 @@
     ui.dots.innerHTML = '';
     for (var i = 0; i < d.done; i++) ui.dots.appendChild(el('span', 'dot' + (i >= prev.done ? ' new' : '')));
     for (var j = 0; j < d.watching; j++) ui.dots.appendChild(el('span', 'dot watch'));
-    var noun = { m1: 'answering', m2: 'contributed', m3: 'asked for the materials', m4: 'committed' }[module];
+    var noun = { m1: 'answering', m2: 'contributed', m3: 'asked for the materials', m4: 'committed', m6: 'answered', m7: 'answered', m8: 'answered' }[module];
     ui.legend.innerHTML = '';
     var a = el('span'); a.appendChild(el('i')); a.appendChild(document.createTextNode(d.done + ' ' + noun));
     add(ui.legend, a);

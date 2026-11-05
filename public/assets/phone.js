@@ -150,7 +150,11 @@
     var i = st.instance;
     if (i && i.module === 'm1') m1Update(i);
     if (i && i.module === 'm5') qfUpdate(i);
-    if (i && i.module !== 'm1' && i.module !== 'm5' && local['s' + i.id]) { i.submitted = true; if (i.module === 'm2' && !i.mine) i.mine = local['s' + i.id]; }
+    if (i && i.module !== 'm1' && i.module !== 'm5' && local['s' + i.id]) {
+      i.submitted = true;
+      if (i.module === 'm2' && !i.mine) i.mine = local['s' + i.id];
+      if (SURVEY[i.module] && !i.mine && typeof local['s' + i.id] === 'object') i.mine = local['s' + i.id];
+    }
     render(false);
   }
 
@@ -159,6 +163,7 @@
     if (!i) return 'waiting';
     if (i.module === 'm1') return 'm1:' + i.id + ':' + (m1.current ? m1.current.id + '.' + m1.current.version : 'done');
     if (i.module === 'm5') return 'm5:' + i.id + ':' + (!qf.profile ? 'profile' : qf.paused ? 'paused' : qf.current ? qf.current.id : 'done');
+    if (SURVEY[i.module]) return i.module + ':' + i.id + ':' + (i.submitted && !svEdit[i.id] ? 'sent:' + JSON.stringify(i.mine) : 'form');
     return i.module + ':' + i.id + ':' + (i.submitted ? 'sent' : 'form');
   }
 
@@ -178,7 +183,7 @@
       return;
     }
     app.appendChild(el('div', { 'class': 'label txt', text: i.title }));
-    ({ m1: renderM1, m2: renderM2, m3: renderContact, m4: renderContact, m5: renderQF })[i.module](i);
+    ({ m1: renderM1, m2: renderM2, m3: renderContact, m4: renderContact, m5: renderQF, m6: renderSurvey, m7: renderSurvey, m8: renderSurvey })[i.module](i);
   }
 
   function checkButton() {
@@ -560,6 +565,157 @@
       });
     });
     app.appendChild(form);
+  }
+
+  // ---------------------------------------------------------------- survey questions: scale, multiple choice, number
+
+  var SURVEY = { m6: true, m7: true, m8: true }, svEdit = {};
+
+  function svAnswerText(i, mine) {
+    if (!mine) return '';
+    if (i.module === 'm7') {
+      var parts = (mine.c || []).slice();
+      if (mine.o) parts.push(i.other_label + (mine.text ? ': ' + mine.text : ''));
+      return parts.join(', ');
+    }
+    return mine.v === null || mine.v === undefined ? '' : String(mine.v) + (i.unit ? ' ' + i.unit : '');
+  }
+
+  function renderSurvey(i) {
+    if (i.submitted && !svEdit[i.id]) {
+      var mineText = svAnswerText(i, i.mine);
+      app.appendChild(el('div', { 'class': 'done' }, [
+        el('h1', { text: 'Thank you!' }),
+        el('p', { 'class': 'lead', text: 'Your answer is in. Watch the screen for the results.' }),
+        mineText ? el('p', { 'class': 'statement txt', style: 'min-height:0', text: mineText }) : null,
+        el('p', {}, [el('button', { 'class': 'btn light', type: 'button', text: 'Change my answer', on: { click: function () { svEdit[i.id] = true; render(true); } } })])
+      ]));
+      return;
+    }
+    var form = el('form', { 'class': 'sv' }, [el('p', { 'class': 'statement txt', style: 'min-height:0', text: i.prompt })]);
+    var err = el('div', { 'class': 'error', role: 'alert', hidden: 'hidden' });
+    var btn = el('button', { 'class': 'btn lime block', type: 'submit', text: 'Send' });
+    var collect = ({ m6: svScale, m7: svChoice, m8: svNumber })[i.module](i, form, btn);
+    form.appendChild(err);
+    form.appendChild(el('p', {}, [btn]));
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var payload = collect();
+      if (!payload) return;
+      if (payload.error) { err.textContent = payload.error; err.hidden = false; return; }
+      payload.instance_id = i.id;
+      sendForm('submit', payload, btn, err).then(function (ok) {
+        if (!ok) return;
+        var mine = i.module === 'm7' ? { c: payload.choices, o: !!payload.other, text: payload.other ? payload.other_text.trim() : '' } : { v: Number(String(payload.value).replace(/[,\s]/g, '')) };
+        local['s' + i.id] = mine; saveLocal();
+        i.submitted = true; i.mine = mine; delete svEdit[i.id];
+        render(true);
+      });
+    });
+    app.appendChild(form);
+  }
+
+  // Scale: a row of buttons for up to 11 points, a slider for longer scales.
+  function svScale(i, form, btn) {
+    var value = i.mine && i.mine.v !== null && i.mine.v !== undefined ? i.mine.v : null;
+    var count = i.max - i.min + 1;
+    if (count <= 11) {
+      var grid = el('div', { 'class': 'scale-grid', role: 'radiogroup', style: 'grid-template-columns:repeat(' + Math.min(count, count > 6 ? Math.ceil(count / 2) : count) + ',1fr)' });
+      for (var v = i.min; v <= i.max; v++) {
+        (function (v) {
+          var b = el('button', { type: 'button', 'class': 'scale-btn' + (v === value ? ' on' : ''), role: 'radio', 'aria-checked': v === value ? 'true' : 'false', text: String(v) });
+          b.addEventListener('click', function () {
+            value = v;
+            Array.prototype.forEach.call(grid.children, function (c) { c.classList.remove('on'); c.setAttribute('aria-checked', 'false'); });
+            b.classList.add('on'); b.setAttribute('aria-checked', 'true');
+          });
+          grid.appendChild(b);
+        })(v);
+      }
+      form.appendChild(grid);
+    } else {
+      var shown = el('div', { 'class': 'scale-value', text: value === null ? '–' : String(value) });
+      var range = el('input', { type: 'range', min: String(i.min), max: String(i.max), step: '1', value: String(value === null ? Math.round((i.min + i.max) / 2) : value), 'aria-label': 'Your answer' });
+      range.addEventListener('input', function () { value = +range.value; shown.textContent = range.value; });
+      form.appendChild(shown);
+      form.appendChild(range);
+    }
+    form.appendChild(el('div', { 'class': 'scale-ends' }, [
+      el('span', { text: i.min + (i.low_label ? ' = ' + i.low_label : '') }),
+      el('span', { text: i.max + (i.high_label ? ' = ' + i.high_label : '') })
+    ]));
+    return function () { return value === null ? { error: 'Please pick a number first.' } : { value: value }; };
+  }
+
+  // Number: typed in, checked against the limits set by the host.
+  function svNumber(i, form) {
+    var input = el('input', { type: 'text', id: 'sv-num', inputmode: i.decimals > 0 ? 'decimal' : 'numeric', autocomplete: 'off',
+      value: i.mine && i.mine.v !== null && i.mine.v !== undefined ? String(i.mine.v) : '' });
+    var row = el('div', { 'class': 'num-row' }, [input, i.unit ? el('span', { 'class': 'unit', text: i.unit }) : null]);
+    var hint = [];
+    if (i.min !== null && i.max !== null) hint.push('Between ' + i.min + ' and ' + i.max);
+    else if (i.min !== null) hint.push('At least ' + i.min);
+    else if (i.max !== null) hint.push('No more than ' + i.max);
+    hint.push(i.decimals > 0 ? 'up to ' + i.decimals + ' decimal place' + (i.decimals > 1 ? 's' : '') : 'whole number');
+    form.appendChild(el('label', { 'for': 'sv-num', text: 'Your answer' }));
+    form.appendChild(row);
+    form.appendChild(el('p', { 'class': 'muted small', text: hint.join(', ').replace(/^./, function (c) { return c.toUpperCase(); }) }));
+    return function () {
+      var raw = input.value.replace(/[,\s]/g, '');
+      if (raw === '' || isNaN(Number(raw))) return { error: 'Please enter a number.' };
+      var n = Number(raw);
+      if (i.min !== null && n < i.min) return { error: 'Please enter a number of at least ' + i.min + '.' };
+      if (i.max !== null && n > i.max) return { error: 'Please enter a number no higher than ' + i.max + '.' };
+      return { value: raw };
+    };
+  }
+
+  // Multiple choice: radio buttons (one answer) or tick boxes (several), and "Other" with a text box below the options.
+  function svChoice(i, form) {
+    var type = i.multi ? 'checkbox' : 'radio', name = 'sv' + i.id, mine = i.mine || { c: [], o: false, text: '' };
+    var fs = el('fieldset', { 'class': 'sv-opts' });
+    if (i.multi) fs.appendChild(el('legend', { 'class': 'muted small', text: i.max_picks > 0 ? 'Pick up to ' + i.max_picks : 'Pick all that apply' }));
+    var boxes = [];
+    i.options.forEach(function (o) {
+      var inp = el('input', { type: type, name: name, value: o });
+      if (mine.c.indexOf(o) >= 0) inp.checked = true;
+      boxes.push(inp);
+      fs.appendChild(el('label', { 'class': 'opt big' }, [inp, el('span', { 'class': 'txt', text: o })]));
+    });
+    var other = null, otherText = null, otherBox = null;
+    if (i.allow_other) {
+      other = el('input', { type: type, name: name, value: '__other' });
+      if (mine.o) other.checked = true;
+      boxes.push(other);
+      fs.appendChild(el('label', { 'class': 'opt big' }, [other, el('span', { 'class': 'txt', text: i.other_label })]));
+      otherText = el('input', { type: 'text', id: 'sv-other', maxlength: String(i.other_max), value: mine.text || '', placeholder: 'Type your answer' });
+      otherBox = el('div', { 'class': 'sv-other' }, [el('label', { 'for': 'sv-other', text: i.other_label + ': your answer' }), otherText]);
+    }
+    form.appendChild(fs);
+    if (otherBox) form.appendChild(otherBox);
+    function sync(e) {
+      if (otherBox) {
+        otherBox.hidden = !other.checked;
+        if (e && e.target === other && other.checked) otherText.focus();
+      }
+      if (i.multi && i.max_picks > 0) {
+        var n = boxes.filter(function (b) { return b.checked; }).length;
+        boxes.forEach(function (b) { b.disabled = !b.checked && n >= i.max_picks; });
+      }
+    }
+    fs.addEventListener('change', sync);
+    // Typing in the box picks "Other" for you.
+    if (otherText) otherText.addEventListener('input', function () {
+      if (otherText.value.trim() && !other.checked && !other.disabled) { other.checked = true; sync(); }
+    });
+    sync();
+    return function () {
+      var choices = boxes.filter(function (b) { return b.checked && b !== other; }).map(function (b) { return b.value; });
+      var o = !!(other && other.checked);
+      if (!choices.length && !o) return { error: 'Please pick an answer first.' };
+      if (o && !otherText.value.trim()) return { error: 'Please write your "' + i.other_label + '" answer.' };
+      return { choices: choices, other: o, other_text: o ? otherText.value : '' };
+    };
   }
 
   // ---------------------------------------------------------------- email banner + pop-up

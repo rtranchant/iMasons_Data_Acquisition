@@ -52,6 +52,17 @@ Hide a slide (e.g. a placeholder) and Next/Previous skip it.
    through the tabs before the next slide): top problems by **lift**, where it breaks (by stage), blind spots
    (Don't know), side by side (only with 8+ people per side and min n on both). All calculations are in
    `qf_compute()` in `src/quickfire.php`, unit-tested by `php tests/qf_compute_test.php`.
+6. **Survey: scale**, 7. **Survey: multiple choice**, 8. **Survey: number** – one question per module, slides:
+   *People answering* (QR code and a dot per answer) and *Answers*. Code in `src/survey.php`; answers are stored in
+   `submissions` and a person can change theirs while the module is open.
+   - **Scale**: whole numbers between two ends set in the admin (e.g. 0–10) with optional end labels; buttons on
+     phones up to 11 points, a slider beyond.
+   - **Number**: optional smallest/largest value, decimal places allowed, optional unit; phones refuse anything outside.
+   - Scale and number *Answers*: average, lowest, highest, 10th and 90th percentile in large type, and a horizontal
+     candlestick (line = lowest to highest, box = 10th to 90th percentile, white line = average).
+   - **Multiple choice**: one or several answers (with an optional limit), and an optional "Other" with a text box.
+     *Answers* lists the options from most to least chosen with the number of people and %; approved "Other" texts
+     are shown underneath. "Other" texts wait for approval on the remote like the text module; they count at once.
 
 Hiding a *Live participation* slide also hides that module's results slide; Next/Previous skip hidden slides.
 

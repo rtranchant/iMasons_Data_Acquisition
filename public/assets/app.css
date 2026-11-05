@@ -66,6 +66,7 @@ form.inline { display: inline; margin: 0; }
 .badge { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 4px 7px; color: #fff; background: var(--teal-shade); white-space: nowrap; }
 .badge.green { background: var(--green-shade); } .badge.red { background: var(--red-shade); }
 .badge.purple { background: var(--purple-shade); } .badge.grey { background: var(--muted); } .badge.pink { background: var(--pink-shade); }
+.badge.teal { background: var(--teal-shade); }
 
 /* Attendee phone */
 body.phone main { width: min(560px, calc(100vw - 32px)); padding-top: 24px; }
@@ -196,3 +197,22 @@ body.has-banner main { padding-bottom: 120px; }
 .qf-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .qf-chip { font: 400 14px "Lexend", sans-serif; padding: 9px 12px; border: 1px solid var(--grey); background: #fff; color: var(--ink); cursor: pointer; }
 .qf-chip.on { border-color: var(--ink); background: var(--tint); font-weight: 600; }
+
+/* Survey questions on phones */
+.scale-grid { display: grid; gap: 8px; margin: 16px 0 8px; }
+.scale-btn { font: 600 22px/1 "Lexend", sans-serif; padding: 16px 0; background: #fff; color: var(--ink); border: 2px solid var(--ink); cursor: pointer; touch-action: manipulation; }
+.scale-btn.on { background: var(--lime); }
+.scale-value { font-size: 56px; font-weight: 600; text-align: center; margin: 12px 0 4px; }
+.sv input[type=range] { width: 100%; accent-color: var(--ink); height: 32px; }
+.scale-ends { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+.scale-ends span:last-child { text-align: right; }
+.num-row { display: flex; align-items: center; gap: 10px; }
+.num-row input { font-size: 24px; flex: 1; min-width: 0; }
+.num-row .unit { font-size: 18px; color: var(--muted); }
+.sv-opts { border: 0; padding: 0; margin: 12px 0 0; }
+.opt.big { padding: 12px 10px; border: 1px solid var(--grid); margin-bottom: 8px; font-size: 17px; cursor: pointer; }
+.opt.big:has(input:checked) { border-color: var(--ink); background: var(--tint); }
+.opt.big:has(input:disabled) { opacity: .45; }
+.opt.big input { flex: none; width: 22px; height: 22px; }
+.sv-other { margin: 0 0 8px; }
+.sv-other label { margin-top: 4px; }

@@ -3,7 +3,7 @@
   'use strict';
   var code = window.EVENT_CODE, app = document.getElementById('app'), errBox = document.getElementById('err');
   var POLL_MS = 2000, busy = false;
-  var MOD = { m1: 'Statements', m2: 'Text input', m3: 'Collateral', m4: 'Pledge', m5: 'Quick-fire', deck: 'Slides' };
+  var MOD = { m1: 'Statements', m2: 'Text input', m3: 'Collateral', m4: 'Pledge', m5: 'Quick-fire', m6: 'Scale', m7: 'Multiple choice', m8: 'Number', deck: 'Slides' };
   var STATUS = { open: ['grey', 'Collecting'], yes: ['green', 'Yes'], no: ['red', 'No'], revise: ['purple', 'Needs revision'] };
 
   function el(tag, attrs, children) {
@@ -88,7 +88,7 @@
     if (inst) {
       k.push([inst.module === 'm1' ? 'Answering' : 'Responded', inst.dots.done]);
       if (inst.module === 'm1') k.push(['Answers', inst.total_answers]);
-      else if (inst.module === 'm2') k.push(['To approve', inst.pending.length]);
+      else if (inst.module === 'm2' || inst.module === 'm7') k.push(['To approve', inst.pending.length]);
       else k.push(['Watching', inst.dots.watching]);
     }
     part('kpis', [k, inst && inst.id, inst && inst.is_open], function (box) {
@@ -105,11 +105,12 @@
       }
     });
 
-    // Approval queues for every text-input module
-    var m2s = st.instances.filter(function (i) { return i.module === 'm2'; });
+    // Approval queues for every text-input module, and "Other" answers of multiple-choice questions
+    // (those only once someone has written one, so the remote isn't cluttered with empty queues).
+    var m2s = st.instances.filter(function (i) { return i.module === 'm2' || (i.module === 'm7' && (i.pending.length || i.approved.length)); });
     part('approve', m2s.map(function (i) { return [i.id, i.title, i.pending, i.approved]; }), function (box) {
       m2s.forEach(function (i) {
-        box.appendChild(el('div', { 'class': 'section', text: 'Approve: ' + i.title + ' (' + i.pending.length + ' waiting)' }));
+        box.appendChild(el('div', { 'class': 'section', text: 'Approve' + (i.module === 'm7' ? ' "Other" answers' : '') + ': ' + i.title + ' (' + i.pending.length + ' waiting)' }));
         if (!i.pending.length) box.appendChild(el('p', { 'class': 'muted small', text: 'Nothing waiting.' }));
         i.pending.forEach(function (p) {
           box.appendChild(el('div', { 'class': 'mod' }, [

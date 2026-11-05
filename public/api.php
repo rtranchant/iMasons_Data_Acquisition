@@ -103,7 +103,7 @@ function handle_phone(array $event, array $p, string $action, array $input): voi
             $inst = collateral_instance($event);
         } else {
             $inst = instance_by_id((int) ($input['instance_id'] ?? 0));
-            if ($inst && ((int) $inst['event_id'] !== (int) $event['id'] || !in_array($inst['module'], ['m2', 'm3', 'm4'], true))) {
+            if ($inst && ((int) $inst['event_id'] !== (int) $event['id'] || !in_array($inst['module'], ['m2', 'm3', 'm4', 'm6', 'm7', 'm8'], true))) {
                 $inst = null;
             }
         }
@@ -161,6 +161,9 @@ function phone_view(array $inst, int $pid): array
         return $v + qf_phone_view($inst, $pid, (string) ($_GET['qh'] ?? ''));
     }
     $sub = submission_for((int) $inst['id'], $pid);
+    if (in_array($inst['module'], SV_MODULES, true)) {
+        return $v + sv_phone_view($inst, $sub);
+    }
     $v['submitted'] = (bool) $sub;
     if ($inst['module'] === 'm2') {
         $v['prompt'] = $cfg['prompt'];
@@ -186,7 +189,13 @@ function save_submission(array $inst, int $pid, array $in): ?string
     $consent = 0;
     $status = 'approved';
 
-    if ($inst['module'] === 'm2') {
+    if (in_array($inst['module'], SV_MODULES, true)) {
+        $r = sv_validate($inst, $in);
+        if (is_string($r)) {
+            return $r;
+        }
+        [$answers, $body, $status] = $r;
+    } elseif ($inst['module'] === 'm2') {
         $body = str_multiline((string) ($in['body'] ?? ''), max(20, (int) $cfg['max_length']));
         if ($body === '') {
             return 'Please write something first.';
@@ -291,6 +300,17 @@ function screen_state(array $event): array
             $s['live'] = qf_live_stats($inst);
             $s['min_n'] = (int) $cfg['min_n'];
             break;
+        case 'm6:collect':
+        case 'm7:collect':
+        case 'm8:collect':
+            $s['prompt'] = $cfg['prompt'];
+            break;
+        case 'm6:results':
+        case 'm7:results':
+        case 'm8:results':
+            $s['prompt'] = $cfg['prompt'];
+            $s['results'] = sv_results($inst);
+            break;
         case 'm5:results':
             $s['results'] = qf_results($inst);
             $s['tab'] = max(1, min(4, (int) $cfg['tab']));
@@ -363,7 +383,7 @@ function remote_state(array $event): array
     $all = event_instances((int) $event['id']);
     $dots = event_dots((int) $event['id']);
     // All text-input statements to moderate, in one query.
-    $m2ids = array_map(function ($i) { return (int) $i['id']; }, array_filter($all, function ($i) { return $i['module'] === 'm2'; }));
+    $m2ids = array_map(function ($i) { return (int) $i['id']; }, array_filter($all, function ($i) { return in_array($i['module'], ['m2', 'm7'], true); }));
     $m2subs = [];
     if ($m2ids) {
         $rows = q("SELECT id, instance_id, body, status FROM submissions
@@ -387,7 +407,7 @@ function remote_state(array $event): array
             $i['qf'] = ['people' => $live['people'], 'by_side' => $live['by_side'], 'answers' => $live['answers'],
                         'coverage' => $live['active'] ? round(100 * $live['reached'] / $live['active']) : 0,
                         'tab' => (int) $inst['config']['tab'], 'side' => $inst['config']['view_side']];
-        } elseif ($inst['module'] === 'm2') {
+        } elseif ($inst['module'] === 'm2' || $inst['module'] === 'm7') {
             $i['pending'] = $m2subs[(int) $inst['id']]['pending'] ?? [];
             $i['approved'] = array_reverse($m2subs[(int) $inst['id']]['approved'] ?? []);
         }

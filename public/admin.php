@@ -141,6 +141,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     $cfg['max_length'] = max(20, min(3000, (int) ($_POST['max_length'] ?? 120)));
                     $cfg['questions'] = parse_questions((string) ($_POST['questions'] ?? ''));
                     break;
+                case 'm6':
+                case 'm7':
+                case 'm8':
+                    [$cfg, $svMsg] = sv_config_from_post($inst['module'], $cfg, $_POST);
+                    break;
                 case 'm5':
                     $cfg['prompt'] = $text('prompt', 400) ?: QF_DEFAULT_PROMPT;
                     $cfg['set'] = in_array($_POST['set'] ?? '', ['core', 'all', 'ids'], true) ? $_POST['set'] : 'core';
@@ -164,7 +169,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     break;
             }
             save_instance_config((int) $inst['id'], $cfg);
-            flash('Saved.');
+            flash(empty($svMsg) ? 'Saved.' : 'Saved. ' . $svMsg);
             redirect($back);
 
         case 'm1_remove':
@@ -277,6 +282,21 @@ if (isset($_GET['export'])) {
         }
         exit;
     }
+    if (in_array($inst['module'], SV_MODULES, true)) {
+        fputcsv($out, ['Question', $inst['config']['prompt']]);
+        $head = ['Submitted (UTC)', 'Participant', 'Answer'];
+        if ($inst['module'] === 'm7') {
+            $head[] = 'Other text';
+            $head[] = 'Other text status';
+        }
+        fputcsv($out, $head);
+        foreach (q('SELECT * FROM submissions WHERE instance_id = ? ORDER BY updated_at', [$inst['id']])->fetchAll() as $r) {
+            $line = array_merge([$r['updated_at'], 'P' . $r['participant_id']], sv_export_answer($inst, $r));
+            $line = array_map(function ($v) { $v = (string) $v; return preg_match('/^[=+@]|^-(?![0-9.])/', $v) ? "'" . $v : $v; }, $line);
+            fputcsv($out, $line);
+        }
+        exit;
+    }
     if ($inst['module'] === 'm1') {
         fputcsv($out, ['Statement', 'Wording version', 'Yes', 'No', "Don't know", 'Total', 'Result']);
         foreach (m1_stats($inst) as $s) {
@@ -329,7 +349,7 @@ if (isset($_GET['instance'])) {
 
 function module_badge(string $module): string
 {
-    $colors = ['m1' => '', 'm2' => 'purple', 'm3' => 'green', 'm4' => 'pink', 'm5' => 'red', 'deck' => 'grey'];
+    $colors = ['m1' => '', 'm2' => 'purple', 'm3' => 'green', 'm4' => 'pink', 'm5' => 'red', 'm6' => 'teal', 'm7' => 'teal', 'm8' => 'teal', 'deck' => 'grey'];
     return '<span class="badge ' . $colors[$module] . '">' . h($module === 'deck' ? 'Slides' : MODULES[$module]['short']) . '</span>';
 }
 
@@ -600,6 +620,9 @@ function render_instance(int $id, ?string $msg): void
         <p class="muted small">One question per block: the question on the first line, each option on its own line starting with "- ", and a blank line between questions.</p>
       </div>
 
+      <?php elseif (in_array($inst['module'], SV_MODULES, true)): render_sv_settings($inst); ?>
+      </div>
+
       <?php elseif ($inst['module'] === 'm5'): render_qf_settings($inst); ?>
       </div>
 
@@ -651,6 +674,10 @@ function status_badge(string $status): string
 
 function render_submissions(array $inst): void
 {
+    if (in_array($inst['module'], SV_MODULES, true)) {
+        render_sv_submissions($inst);
+        return;
+    }
     $rows = q('SELECT * FROM submissions WHERE instance_id = ? ORDER BY created_at DESC LIMIT 500', [$inst['id']])->fetchAll();
     echo '<div class="section">Responses (' . count($rows) . ')</div>';
     if (!$rows) {
@@ -799,4 +826,81 @@ function render_qf_panels(array $inst): void
       <p><b>On the big screen:</b> keys 1–4 switch tabs; → and ← (or a clicker) go through the tabs and then on to the next slide; ↓ and ↑ show the next or previous 5 rows; Enter shows the top row alone, full screen; Esc goes back to the list.</p>
     </div>
     <?php
+}
+
+// ---------------------------------------------------------------- survey modules (m6 scale, m7 multiple choice, m8 number)
+
+function render_sv_settings(array $inst): void
+{
+    $cfg = $inst['config'];
+    $num = function ($v) { return $v === null ? '' : rtrim(rtrim(number_format((float) $v, 3, '.', ''), '0'), '.'); };
+    ?>
+        <label for="prompt">Question</label>
+        <textarea id="prompt" name="prompt" style="min-height:70px"><?= h($cfg['prompt']) ?></textarea>
+    <?php if ($inst['module'] === 'm6'): ?>
+        <div class="grid2">
+          <div><label for="smin">Lowest value</label><input type="number" id="smin" name="min" step="1" value="<?= (int) $cfg['min'] ?>"></div>
+          <div><label for="smax">Highest value</label><input type="number" id="smax" name="max" step="1" value="<?= (int) $cfg['max'] ?>"></div>
+          <div><label for="slo">Label for the lowest value (optional)</label><input type="text" id="slo" name="low_label" value="<?= h($cfg['low_label']) ?>"></div>
+          <div><label for="shi">Label for the highest value (optional)</label><input type="text" id="shi" name="high_label" value="<?= h($cfg['high_label']) ?>"></div>
+        </div>
+        <p class="muted small">Whole numbers only. Up to 11 points show as buttons on phones; longer scales show as a slider.</p>
+    <?php elseif ($inst['module'] === 'm7'): ?>
+        <label for="opts">Options (one per line)</label>
+        <textarea id="opts" name="options" style="min-height:140px"><?= h(implode("\n", $cfg['options'])) ?></textarea>
+        <p class="muted small">Renaming an option starts its count again; answers to the old wording stay in the export.</p>
+        <label class="check"><input type="checkbox" name="multi" value="1" <?= $cfg['multi'] ? 'checked' : '' ?>> People can pick more than one option</label>
+        <div class="grid2">
+          <div><label for="mp">Most options one person can pick (0 = no limit)</label><input type="number" id="mp" name="max_picks" min="0" max="30" value="<?= (int) $cfg['max_picks'] ?>"></div>
+        </div>
+        <label class="check"><input type="checkbox" name="allow_other" value="1" <?= $cfg['allow_other'] ? 'checked' : '' ?>> Offer an "Other" answer with a text box</label>
+        <label for="ol">Name of the "Other" answer</label>
+        <input type="text" id="ol" name="other_label" value="<?= h($cfg['other_label']) ?>">
+        <p class="muted small">"Other" texts wait for your approval on the remote, as in the text module. They count straight away; approval only decides whether the text is shown on the screen.</p>
+    <?php else: ?>
+        <div class="grid2">
+          <div><label for="nmin">Smallest number allowed (blank = no limit)</label><input type="number" id="nmin" name="min" step="any" value="<?= h($num($cfg['min'])) ?>"></div>
+          <div><label for="nmax">Largest number allowed (blank = no limit)</label><input type="number" id="nmax" name="max" step="any" value="<?= h($num($cfg['max'])) ?>"></div>
+          <div><label for="ndec">Decimal places allowed</label><input type="number" id="ndec" name="decimals" min="0" max="3" value="<?= (int) $cfg['decimals'] ?>"></div>
+          <div><label for="nunit">Unit (optional, e.g. MW, years, %)</label><input type="text" id="nunit" name="unit" value="<?= h($cfg['unit']) ?>"></div>
+        </div>
+        <p class="muted small">Phones refuse numbers outside these limits.</p>
+    <?php endif; ?>
+        <p class="muted small">On the answers screen: the bar runs from the lowest to the highest answer, the box covers the middle 80% of answers (10th to 90th percentile), and the white line marks the average.</p>
+    <?php
+}
+
+function render_sv_submissions(array $inst): void
+{
+    $res = sv_results($inst);
+    echo '<div class="section">Answers (' . (int) $res['people'] . ')</div>';
+    if ($inst['module'] === 'm7') {
+        echo '<table class="data" style="margin-top:12px"><tr><th>Option</th><th>Chosen</th></tr>';
+        foreach ($res['choices'] as $c) {
+            echo '<tr><td class="txt">' . h($c['label']) . '</td><td>' . (int) $c['count'] . '</td></tr>';
+        }
+        echo '</table>';
+        $rows = q("SELECT updated_at, body, status FROM submissions WHERE instance_id = ? AND body <> '' ORDER BY updated_at DESC LIMIT 500", [$inst['id']])->fetchAll();
+        if ($rows) {
+            echo '<p class="small muted" style="margin-top:16px">"' . h($inst['config']['other_label']) . '" texts. Approve them on the remote.</p>';
+            echo '<table class="data"><tr><th>When (UTC)</th><th>Text</th><th>Status</th></tr>';
+            foreach ($rows as $r) {
+                echo '<tr><td>' . h(substr($r['updated_at'], 5, 11)) . '</td><td class="txt">' . h($r['body']) . '</td><td>' . h($r['status']) . '</td></tr>';
+            }
+            echo '</table>';
+        }
+        return;
+    }
+    $st = $res['stats'];
+    if (!$st['n']) {
+        echo '<p class="muted">Nothing yet.</p>';
+        return;
+    }
+    $d = $inst['module'] === 'm6' ? 1 : (int) $inst['config']['decimals'] + 1;
+    echo '<table class="data" style="margin-top:12px"><tr><th>Answers</th><th>Average</th><th>Lowest</th><th>10th percentile</th><th>90th percentile</th><th>Highest</th></tr><tr>';
+    echo '<td>' . (int) $st['n'] . '</td>';
+    foreach (['mean', 'min', 'p10', 'p90', 'max'] as $k) {
+        echo '<td>' . h(sv_fmt((float) $st[$k], $d)) . '</td>';
+    }
+    echo '</tr></table>';
 }

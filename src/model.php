@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/quickfire.php';
+require_once __DIR__ . '/survey.php';
 
 /** How often an idle phone checks what is live (seconds). */
 const PHONE_CHECK_S = 10;
@@ -39,6 +40,21 @@ const MODULES = [
         'short'  => 'Quick-fire',
         'slides' => ['collect' => 'Live feedback', 'results' => 'Results'],
     ],
+    'm6' => [
+        'name'   => 'Survey: scale',
+        'short'  => 'Scale',
+        'slides' => ['collect' => 'People answering', 'results' => 'Answers'],
+    ],
+    'm7' => [
+        'name'   => 'Survey: multiple choice',
+        'short'  => 'Multiple choice',
+        'slides' => ['collect' => 'People answering', 'results' => 'Answers'],
+    ],
+    'm8' => [
+        'name'   => 'Survey: number',
+        'short'  => 'Number',
+        'slides' => ['collect' => 'People answering', 'results' => 'Answers'],
+    ],
 ];
 
 function default_config(string $module): array
@@ -63,6 +79,10 @@ function default_config(string $module): array
             ];
         case 'm5':
             return qf_default_config();
+        case 'm6':
+        case 'm7':
+        case 'm8':
+            return sv_default_config($module);
         case 'm4':
             return [
                 'pledge'  => 'I commit to ...',
