@@ -6,6 +6,11 @@
   var root = document.getElementById('screen');
   var POLL_MS = 1500, WALL_SWAP_MS = 6000, ANSWER_MIN_MS = 10000, FADE_MS = 800, LAYER_FADE_MS = 250;
   var WALL_SIZE = 8;
+  // Export mode (?preview=slide id&tab=n): show that one slide with its final data, no animations,
+  // ask the server once, then set window.__ready so the export page can take the picture.
+  var params = new URLSearchParams(location.search);
+  var PREVIEW = params.get('preview'), PREVIEW_TAB = +params.get('tab') || 0;
+  if (PREVIEW) { document.documentElement.classList.add('preview'); FADE_MS = 0; }
   var layoutKey = null, ui = {}, timers = [], stage = null, currentLayer = null, shownIsImage = false;
 
   function el(tag, cls, text) {
@@ -735,21 +740,29 @@
 
   // ---------------------------------------------------------------- loop
 
-  // Short requests only: ask, wait for the answer, then wait 2 s before asking again (never two at once).
+  // Short requests only: ask, wait for the answer, then wait 5 s before asking again (never two at once).
   // Laptop key presses do not wait: they switch slides here at once and ask the server straight after.
   // Unchanged replies are tiny ({same:true}); errors make it wait longer; a hidden tab asks rarely.
-  var POLL_VISIBLE_MS = 2000, POLL_HIDDEN_MS = 10000, MAX_BACKOFF_MS = 30000;
+  var POLL_VISIBLE_MS = window.SCREEN_CHECK_MS || 5000, POLL_HIDDEN_MS = 10000, MAX_BACKOFF_MS = 30000;
   var offline = document.getElementById('offline'), lastHash = '', failures = 0, pollTimer = null, polling = false, again = false;
   var preloaded = {}, nav = [], eventName = document.title.replace(/ – Screen$/, '');
   var currentSlide = null;
   var pending = null;   // {id, until}: a slide this screen switched to itself and is waiting for the server to confirm
+  function previewDone() {
+    // Let fonts, images and the last fade-ins settle before the picture is taken.
+    (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(function () {
+      var imgs = Array.prototype.slice.call(document.images).filter(function (im) { return !im.complete; });
+      return Promise.all(imgs.map(function (im) { return new Promise(function (ok) { im.onload = im.onerror = ok; }); }));
+    }).then(function () { setTimeout(function () { window.__ready = true; }, 1400); });
+  }
   function poll() {
     // A check is already on its way: run another one as soon as it returns, never skip it.
     if (polling) { again = true; return; }
     polling = true;
     again = false;
     clearTimeout(pollTimer);
-    var url = 'api.php?a=screen&c=' + encodeURIComponent(code) + (lastHash ? '&h=' + lastHash : '');
+    var url = 'api.php?a=screen&c=' + encodeURIComponent(code) + (lastHash ? '&h=' + lastHash : '') +
+      (PREVIEW ? '&preview=' + encodeURIComponent(PREVIEW) : '');
     fetch(url, { credentials: 'same-origin', cache: 'no-store' })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (state) {
@@ -762,6 +775,7 @@
         lastHash = state.h || '';
         nav = state.nav || nav;
         currentSlide = state.slide;
+        if (PREVIEW && PREVIEW_TAB && state.slide) state.slide.tab = PREVIEW_TAB;
         eventName = state.event || eventName;
         var key = state.slide ? state.slide.id + ':' + state.slide.kind : 'hold';
         if (key !== layoutKey) { layoutKey = key; build(state); }
@@ -777,6 +791,7 @@
       .catch(function () { failures++; if (failures >= 2) offline.hidden = false; })
       .then(function () {
         polling = false;
+        if (PREVIEW) { previewDone(); return; }
         if (again) { poll(); return; }
         var wait = document.hidden ? POLL_HIDDEN_MS : POLL_VISIBLE_MS;
         if (failures) wait = Math.min(MAX_BACKOFF_MS, 1000 * Math.pow(2, failures));

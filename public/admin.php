@@ -418,6 +418,14 @@ function render_event(int $id, ?string $msg): void
         <div class="codebox"><?= h($join) ?></div></div>
     </div>
 
+    <div class="section">After the session</div>
+    <div class="grid2" style="margin:16px 0 8px">
+      <div class="box"><label style="margin-top:0">Slides with results</label><p class="small muted">A PDF with a picture of every slide, including the data pages with their final results.</p>
+        <a class="btn light" href="export.php?event=<?= $id ?>">Export slides as PDF</a></div>
+      <div class="box"><label style="margin-top:0">Impact story</label><p class="small muted">A press-release style story of the session, written from everything collected.</p>
+        <a class="btn light" href="story.php?event=<?= $id ?>">Impact story</a></div>
+    </div>
+
     <div class="section">Upload slides</div>
     <div class="box" id="uploader" data-event="<?= $id ?>">
       <p class="muted small" style="margin-top:0">In PowerPoint choose <b>File → Save As → PDF</b> (or File → Export → PNG) and upload the result.

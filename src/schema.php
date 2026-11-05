@@ -213,4 +213,18 @@ return [
             }
         },
     ],
+
+    // Impact story per event: the host's notes and the last story written (editable).
+    7 => [
+        "CREATE TABLE IF NOT EXISTS event_stories (
+            event_id INT PRIMARY KEY,
+            notes TEXT NULL,
+            story MEDIUMTEXT NULL,
+            status VARCHAR(12) NOT NULL DEFAULT 'none',
+            error TEXT NULL,
+            model VARCHAR(60) NULL,
+            updated_at DATETIME NOT NULL,
+            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        )$engine",
+    ],
 ];

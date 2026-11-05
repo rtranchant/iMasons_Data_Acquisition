@@ -35,6 +35,10 @@ try {
         case 'screen':
             // Short request, answered at once. If nothing changed since the screen's last copy,
             // only a tiny "same" reply is sent.
+            // Export: an admin can ask for any one slide (?preview=slide id) without changing what the room sees.
+            if (isset($_GET['preview']) && is_admin()) {
+                $event['current_slide_id'] = (int) $_GET['preview'];
+            }
             json_out_unless_same(screen_state($event));
             break;
         default:

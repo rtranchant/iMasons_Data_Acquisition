@@ -336,3 +336,8 @@ body:has(.layer.in .qf-tabs) .fs { right: auto; left: 12px; }
 .sv-chips { min-height: 0; flex: 1; overflow: hidden; display: flex; flex-wrap: wrap; gap: 1vw; align-content: flex-start; }
 .sv-chip { font-size: max(24px, 1.5vw); border: 1px solid var(--line); border-left: .4vw solid var(--amber); padding: .8vh 1vw; max-width: 100%; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+
+/* Export pictures (?preview=...): no controls, no animations */
+.preview .fs, .preview .offline, .preview .hint { display: none !important; }
+.preview .layer, .preview .card, .preview .answer-text, .preview .dot { transition: none !important; animation: none !important; }
+.preview body { cursor: default; }

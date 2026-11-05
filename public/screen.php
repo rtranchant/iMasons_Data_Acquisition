@@ -22,14 +22,15 @@ if (!$event) {
   <link rel="preload" href="assets/fonts/lexend-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/lexend-600.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/fonts/lexend.css?v=1">
-  <link rel="stylesheet" href="assets/screen.css?v=23">
+  <link rel="stylesheet" href="assets/screen.css?v=24">
 </head>
 <body>
   <div id="screen" aria-live="polite"></div>
   <div class="offline" id="offline" hidden>Reconnecting…</div>
   <button id="fs" class="fs" type="button" title="Full screen">⛶ Full screen</button>
   <script src="assets/vendor/qrcode.js?v=1"></script>
-  <script>window.EVENT_CODE = <?= json_encode($event['code']) ?>;<?php if (is_admin()): ?> window.CSRF = <?= json_encode(csrf_token()) ?>;<?php endif; ?></script>
-  <script src="assets/screen.js?v=19"></script>
+  <?php if (isset($_GET['preview'])): ?><script src="assets/vendor/html-to-image.js?v=1"></script><?php endif; ?>
+  <script>window.EVENT_CODE = <?= json_encode($event['code']) ?>; window.SCREEN_CHECK_MS = <?= (int) round(1000 * max(0.4, min(30, (float) (app_config()['screen_check_s'] ?? 5)))) ?>;<?php if (is_admin()): ?> window.CSRF = <?= json_encode(csrf_token()) ?>;<?php endif; ?></script>
+  <script src="assets/screen.js?v=20"></script>
 </body>
 </html>

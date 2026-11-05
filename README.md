@@ -66,6 +66,18 @@ Hide a slide (e.g. a placeholder) and Next/Previous skip it.
 
 Hiding a *Live participation* slide also hides that module's results slide; Next/Previous skip hidden slides.
 
+## After the session
+
+- **Export slides** (event page → *Export slides as PDF*, `public/export.php`): a PDF with one 1920×1080 picture per
+  visible slide, in run-of-show order. Uploaded slides are used as they are; each data page is opened in a hidden copy
+  of the big screen (`screen.php?c=CODE&preview=SLIDE_ID`, admin only, does not change what the room sees) and
+  captured in the browser (bundled `html-to-image` and `jsPDF`, both MIT). Quick-fire results get one page per tab.
+- **Impact story** (event page → *Impact story*, `public/story.php`, `src/story.php`): a press-release style story
+  written by Claude from the host's notes, the uploaded slides (as images) and every module's aggregate results and
+  approved texts. Names and emails are never sent. Needs `anthropic_api_key` in `imasons_config.php`; without it the
+  page shows the material to paste into Claude. The reply is streamed, so the web server never times out, and the
+  story is saved even if the browser is closed. The story can be edited, copied and downloaded as Markdown.
+
 ## Deployment
 
 Push to `main` → Plesk pulls → live at `/imasons_session_running_platform/public/`.
@@ -82,7 +94,7 @@ So nothing keeps a connection open, and no device sends a new request before its
 | Device | What it does |
 |---|---|
 | Attendee phone | Asks what is live every 10 s (`phone_check_s` in the config, 2–60), spread randomly so a room never asks in sync, and at once when tapped, unlocked or brought back to the page. Each answer is its own short request from a queue saved on the phone, so swiping never waits and nothing is lost on bad Wi-Fi; answers given while a request is still on its way travel together in the next one. Yes/No statements are shuffled on the phone. Requests are sent with `Connection: close`. |
-| Big screen | Short request 2 s after the previous reply came back, never two at once (every 10 s in a hidden tab), so a slow database never builds a queue; unchanged replies are ~30 bytes. Key presses and clicks on the laptop switch between uploaded slides instantly (they are preloaded) and tell the server in the background; data collection pages appear as soon as the server answers. Slide to slide is an instant cut; to or from a data collection page, a 0.25 s fade. "Open big screen" always reuses the same tab. |
+| Big screen | Short request 5 s after the previous reply came back, never two at once (every 10 s in a hidden tab), so a slow database never builds a queue; unchanged replies are ~30 bytes. Key presses and clicks on the laptop switch between uploaded slides instantly (they are preloaded) and tell the server in the background; data collection pages appear as soon as the server answers. Slide to slide is an instant cut; to or from a data collection page, a 0.25 s fade. "Open big screen" always reuses the same tab. |
 | Remote | Short request every 2 s, waiting for each reply. Buttons send one request each. |
 | All | On errors they wait longer between tries (up to 30–60 s) instead of retrying faster, and show "Reconnecting". |
 

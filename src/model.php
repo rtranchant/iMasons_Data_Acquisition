@@ -6,6 +6,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/quickfire.php';
 require_once __DIR__ . '/survey.php';
+require_once __DIR__ . '/story.php';
 
 /** How often an idle phone checks what is live (seconds). */
 const PHONE_CHECK_S = 10;
