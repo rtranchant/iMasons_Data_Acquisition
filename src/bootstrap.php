@@ -120,11 +120,18 @@ function q(string $sql, array $params = []): PDOStatement
 /** Apply any pending migrations from src/schema.php. Cheap when up to date. */
 function migrate(): void
 {
+    // Remember the last applied version in a small file, so pages don't ask the database every time.
+    $migrations = require __DIR__ . '/schema.php';
+    $latest = max(array_keys($migrations));
+    $c = app_config()['db'];
+    $marker = rtrim(sys_get_temp_dir(), '/') . '/imasons_schema_' . md5(__DIR__ . $c['host'] . $c['name']);
+    if ((int) @file_get_contents($marker) === $latest) {
+        return;
+    }
     db()->exec('CREATE TABLE IF NOT EXISTS schema_migrations (
         version INT PRIMARY KEY, applied_at DATETIME NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
     $done = array_map('intval', q('SELECT version FROM schema_migrations')->fetchAll(PDO::FETCH_COLUMN));
-    $migrations = require __DIR__ . '/schema.php';
     ksort($migrations);
     foreach ($migrations as $version => $statements) {
         if (in_array($version, $done, true)) {
@@ -135,6 +142,7 @@ function migrate(): void
         }
         q('INSERT INTO schema_migrations (version, applied_at) VALUES (?, UTC_TIMESTAMP())', [$version]);
     }
+    @file_put_contents($marker, (string) $latest, LOCK_EX);
 }
 
 // ---------------------------------------------------------------- helpers

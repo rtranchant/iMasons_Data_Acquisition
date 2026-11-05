@@ -1,1 +1,3 @@
 imasons_config.php
+public/media/*
+!public/media/.htaccess

@@ -227,4 +227,9 @@ return [
             FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
         )$engine",
     ],
+
+    // Quick-fire counts per statement read an index instead of the whole answers table.
+    8 => [
+        "ALTER TABLE qf_answers ADD INDEX inst_stmt (instance_id, statement_id, answer)",
+    ],
 ];

@@ -206,7 +206,7 @@ function sv_number_stats(array $values): array
 /** Results for the big screen. Cached for a second: the screen asks several times a second. */
 function sv_results(array $inst): array
 {
-    return qf_cached('sv' . $inst['id'] . json_encode($inst['config']), 1, function () use ($inst) {
+    return qf_cached('sv' . $inst['id'] . json_encode($inst['config']) . event_rev((int) $inst['event_id']), 1, function () use ($inst) {
         $cfg = $inst['config'];
         $rows = q('SELECT answers, body, status FROM submissions WHERE instance_id = ? ORDER BY updated_at', [$inst['id']])->fetchAll();
         if ($inst['module'] === 'm7') {

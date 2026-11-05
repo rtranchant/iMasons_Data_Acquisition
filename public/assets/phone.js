@@ -60,7 +60,10 @@
     checking = true;
     lastCheck = Date.now();
     clearTimeout(nextTimer);
-    request('phone' + (qf.hash ? '&qh=' + qf.hash : '')).then(function (r) {
+    // Answers waiting on this phone travel with the check: one request every ~10 s per phone, however fast people swipe.
+    var batch = answersAtHead();
+    request('phone' + (qf.hash ? '&qh=' + qf.hash : ''), batch.items.length ? { answers: batch.items } : null).then(function (r) {
+      if (r.status === 200 && !r.data.error && batch.take) { queue.splice(0, batch.take); store(QKEY, queue); }
       if (r.status === 200 && !r.data.error) {
         failures = 0;
         setOffline(false);
@@ -80,6 +83,8 @@
         if (stop === 'stop') return;
         if (failures) setOffline(failures >= 2);
         var wait = failures ? Math.min(MAX_BACKOFF_S, CHECK_S * Math.pow(2, failures - 1)) : CHECK_S;
+        // A phone in a pocket or a forgotten tab checks once a minute; it checks at once when looked at again.
+        if (document.hidden) wait = Math.max(wait, 60);
         scheduleCheck(jitter(wait));
       });
   }
@@ -97,19 +102,40 @@
   document.addEventListener('visibilitychange', function () { if (!document.hidden) checkSoon(); });
   window.addEventListener('focus', checkSoon);
   window.addEventListener('pageshow', checkSoon);
-  window.addEventListener('online', function () { checkSoon(); pumpQueue(); });
+  window.addEventListener('online', function () { checkSoon(); pumpQueue(); });   // pumpQueue: profile, forms
 
   // ---------------------------------------------------------------- send queue (answers)
 
   var QKEY = 'imq_' + code, queue = store(QKEY) || [], pumping = false, qFailures = 0, qTimer = null;
 
+  // Yes/No and quick-fire answers wait here and go with the next check (every ~10 s), or straight away
+  // when many are waiting or the attendee leaves the page. Everything else (profile, forms) goes at once.
+  var ANSWER = { m1_answer: true, qf_answer: true }, BATCH_MAX = 60;
+  function answersAtHead() {
+    var items = [], take = 0;
+    while (take < queue.length && ANSWER[queue[take].a] && items.length < BATCH_MAX) { items.push({ a: queue[take].a, b: queue[take].b }); take++; }
+    return { items: items, take: take };
+  }
   function enqueue(action, body) {
     queue.push({ a: action, b: body });
     store(QKEY, queue);
-    pumpQueue();
+    if (!ANSWER[action]) pumpQueue();
+    else if (queue.length >= 25) check();
   }
+  // Leaving the page (closing the tab, switching app): send what is waiting, without waiting for a reply.
+  // Sending an answer twice is harmless: the server keeps one answer per person and statement.
+  function sendBeforeLeaving() {
+    var batch = answersAtHead();
+    if (!batch.items.length || !window.fetch) return;
+    try {
+      fetch('api.php?a=phone&c=' + encodeURIComponent(code), { method: 'POST', keepalive: true, credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers: batch.items }) });
+    } catch (e) {}
+  }
+  window.addEventListener('pagehide', sendBeforeLeaving);
+  document.addEventListener('visibilitychange', function () { if (document.hidden) sendBeforeLeaving(); });
   function pumpQueue() {
-    if (pumping || !queue.length) return;
+    if (pumping || !queue.length || ANSWER[queue[0].a]) return;   // answers at the head go with the next check
     pumping = true;
     clearTimeout(qTimer);
     // Answers given while the previous request was on its way go together in this one.

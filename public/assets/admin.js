@@ -185,6 +185,19 @@
     });
   });
 
+  // Drag-to-reorder the run of show. One save at a time: drags made while a save is on its way
+  // are combined into a single save of the latest order when it returns.
+  var saving = false, nextOrder = null;
+  function saveOrder(fd) {
+    if (saving) { nextOrder = fd; return; }
+    saving = true;
+    fetch('admin.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { if (!r.ok) throw new Error(); })
+      .then(function () {
+        saving = false;
+        if (nextOrder) { var n = nextOrder; nextOrder = null; saveOrder(n); }
+      }, function () { saving = false; alert('Could not save the new order. The page will reload.'); location.reload(); });
+  }
   // Drag-to-reorder the run of show
   var list = document.getElementById('ros-list');
   if (list && window.Sortable) {
@@ -202,9 +215,7 @@
           var n = r.querySelector('.num');
           if (n) n.textContent = String(i + 1);
         });
-        fetch('admin.php', { method: 'POST', body: fd, credentials: 'same-origin' })
-          .then(function (r) { if (!r.ok) throw new Error(); })
-          .catch(function () { alert('Could not save the new order. The page will reload.'); location.reload(); });
+        saveOrder(fd);
       }
     });
   }

@@ -412,6 +412,20 @@ function qf_options(array $cfg, ?string $side = null): array
 }
 
 /** Small file cache so the big screen's frequent checks don't recompute everything each time. */
+/** A number that changes whenever the host changes something in an event; part of every cache key for it. */
+function event_rev(int $eventId): string
+{
+    return (string) @file_get_contents(rtrim(sys_get_temp_dir(), '/') . '/imasons_rev_' . md5(__DIR__) . '_' . $eventId);
+}
+
+/** The host changed the event (slide, open/closed, settings): phones, screen and remote see it on their next check. */
+function event_bump(int $eventId): void
+{
+    if ($eventId > 0) {
+        @file_put_contents(rtrim(sys_get_temp_dir(), '/') . '/imasons_rev_' . md5(__DIR__) . '_' . $eventId, uniqid('', true), LOCK_EX);
+    }
+}
+
 function qf_cached(string $key, int $ttl, callable $fn): array
 {
     $file = rtrim(sys_get_temp_dir(), '/') . '/imasons_qf_' . md5(__DIR__ . $key) . '.json';
@@ -423,13 +437,20 @@ function qf_cached(string $key, int $ttl, callable $fn): array
     }
     $data = $fn();
     @file_put_contents($file, json_encode($data, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    if (mt_rand(1, 500) === 1) {   // now and then, remove cache files nobody has used for an hour
+        foreach ((array) glob(rtrim(sys_get_temp_dir(), '/') . '/imasons_qf_*.json') as $old) {
+            if (is_file($old) && filemtime($old) < time() - 3600) {
+                @unlink($old);
+            }
+        }
+    }
     return $data;
 }
 
 /** Page A numbers: participation only, never statement text or results. */
 function qf_live_stats(array $inst): array
 {
-    return qf_cached('live' . $inst['id'] . json_encode($inst['config']), 2, function () use ($inst) {
+    return qf_cached('qflive' . $inst['id'] . json_encode($inst['config']) . event_rev((int) $inst['event_id']), 4, function () use ($inst) {
         $iid = (int) $inst['id'];
         $bySide = array_fill_keys(array_keys(QF_SIDES), 0);
         foreach (q('SELECT side, COUNT(*) n FROM qf_participants WHERE instance_id = ? GROUP BY side', [$iid])->fetchAll() as $r) {
@@ -466,7 +487,7 @@ function qf_live_stats(array $inst): array
 /** Page B numbers: all four tabs, so the screen can switch tabs instantly. */
 function qf_results(array $inst): array
 {
-    return qf_cached('res' . $inst['id'] . json_encode($inst['config']), 3, function () use ($inst) {
+    return qf_cached('res' . $inst['id'] . json_encode($inst['config']) . event_rev((int) $inst['event_id']), 3, function () use ($inst) {
         [$st, $people, $answers, $latest] = qf_load($inst);
         $cfg = $inst['config'];
         $opt = qf_options($cfg);
@@ -507,20 +528,26 @@ function qf_results(array $inst): array
 /** What a phone needs: its profile, the prompt, statement texts (only when changed), counts, its answers. */
 function qf_phone_view(array $inst, int $pid, string $clientHash): array
 {
-    $st = qf_statements($inst);
-    $list = [];
-    foreach ($st as $s) {
-        if ($s['in_set'] || ($s['is_check'] && $s['active'])) {
-            $list[] = ['id' => $s['id'], 'text' => $s['statement'], 'check' => $s['is_check']];
+    // The statement list and the answer counts are the same for every phone: read once per 3 s for all.
+    $shared = qf_cached('phone' . $inst['id'] . json_encode($inst['config']) . event_rev((int) $inst['event_id']), 3, function () use ($inst) {
+        $st = qf_statements($inst);
+        $list = [];
+        foreach ($st as $s) {
+            if ($s['in_set'] || ($s['is_check'] && $s['active'])) {
+                $list[] = ['id' => $s['id'], 'text' => $s['statement'], 'check' => $s['is_check']];
+            }
         }
-    }
-    $hash = substr(md5(json_encode($list)), 0, 10);
-    $counts = [];
-    foreach (q('SELECT statement_id, COUNT(*) n FROM qf_answers WHERE instance_id = ? GROUP BY statement_id', [$inst['id']])->fetchAll(PDO::FETCH_NUM) as $r) {
-        if (isset($st[(int) $r[0]]) && $st[(int) $r[0]]['in_set']) {
-            $counts[(int) $r[0]] = (int) $r[1];
+        $counts = [];
+        foreach (q('SELECT statement_id, COUNT(*) n FROM qf_answers WHERE instance_id = ? GROUP BY statement_id', [$inst['id']])->fetchAll(PDO::FETCH_NUM) as $r) {
+            if (isset($st[(int) $r[0]]) && $st[(int) $r[0]]['in_set']) {
+                $counts[(string) (int) $r[0]] = (int) $r[1];
+            }
         }
-    }
+        return ['list' => $list, 'hash' => substr(md5(json_encode($list)), 0, 10), 'counts' => $counts];
+    });
+    $list = $shared['list'];
+    $hash = $shared['hash'];
+    $counts = $shared['counts'];
     $prof = q('SELECT side, segment FROM qf_participants WHERE instance_id = ? AND participant_id = ?', [$inst['id'], $pid])->fetch();
     $mine = array_map('intval', q('SELECT statement_id FROM qf_answers WHERE participant_id = ? AND instance_id = ?', [$pid, $inst['id']])->fetchAll(PDO::FETCH_COLUMN));
     $v = [
@@ -554,20 +581,31 @@ function qf_save_profile(array $event, int $pid, array $in): bool
 /** One write per answer; the statement must belong to this open module of this event. Answering twice overwrites. */
 function qf_save_answers(int $eventId, int $instanceId, int $pid, array $answers): int
 {
-    $n = 0;
+    // One query for the whole batch (a phone sends what it collected since its last check).
+    $byId = [];
     foreach (array_slice($answers, 0, 100) as $a) {
         $ans = strtoupper((string) ($a['answer'] ?? ''));
-        if (!in_array($ans, ['Y', 'N', 'D'], true)) {
-            continue;
+        $sid = (int) ($a['statement_id'] ?? 0);
+        if ($sid > 0 && in_array($ans, ['Y', 'N', 'D'], true)) {
+            $byId[$sid] = $ans;   // answered twice in one batch: the last answer counts
         }
-        $n += q("INSERT INTO qf_answers (instance_id, participant_id, statement_id, answer, created)
-                 SELECT s.instance_id, ?, s.id, ?, UTC_TIMESTAMP()
-                 FROM qf_statements s JOIN instances i ON i.id = s.instance_id
-                 WHERE s.id = ? AND s.active = 1 AND i.id = ? AND i.event_id = ? AND i.module = 'm5' AND i.is_open = 1
-                 ON DUPLICATE KEY UPDATE answer = VALUES(answer), created = VALUES(created)",
-            [$pid, $ans, (int) ($a['statement_id'] ?? 0), $instanceId, $eventId])->rowCount() > 0 ? 1 : 0;
     }
-    return $n;
+    if (!$byId) {
+        return 0;
+    }
+    $case = 'CASE s.id' . str_repeat(' WHEN ? THEN ?', count($byId)) . ' END';
+    $params = [$pid];
+    foreach ($byId as $sid => $ans) {
+        $params[] = $sid;
+        $params[] = $ans;
+    }
+    $params = array_merge($params, array_keys($byId), [$instanceId, $eventId]);
+    return q("INSERT INTO qf_answers (instance_id, participant_id, statement_id, answer, created)
+              SELECT s.instance_id, ?, s.id, $case, UTC_TIMESTAMP()
+              FROM qf_statements s JOIN instances i ON i.id = s.instance_id
+              WHERE s.id IN (" . implode(',', array_fill(0, count($byId), '?')) . ") AND s.active = 1
+                AND i.id = ? AND i.event_id = ? AND i.module = 'm5' AND i.is_open = 1
+              ON DUPLICATE KEY UPDATE answer = VALUES(answer), created = VALUES(created)", $params)->rowCount();
 }
 
 // ---------------------------------------------------------------- admin helpers

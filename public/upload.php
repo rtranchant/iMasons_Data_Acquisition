@@ -82,6 +82,14 @@ try {
         $st->bindValue(8, $files['image']['data'], PDO::PARAM_LOB);
         $st->bindValue(9, $files['thumb']['data'], PDO::PARAM_LOB);
         $st->execute();
+        // Save the files to disk too, so showing this slide never reads it back from the database.
+        $pg = q('SELECT id, pkey FROM deck_pages WHERE deck_id = ? AND batch = ? AND page_no = ?', [(int) $deck['id'], $batch, $pageNo])->fetch();
+        $pid = (int) ($pg['id'] ?? 0);
+        $pkey = (string) ($pg['pkey'] ?? '');
+        if ($pid && $pkey !== '') {
+            media_write($pid, $pkey, false, $files['image']['mime'], $files['image']['data']);
+            media_write($pid, $pkey, true, 'image/jpeg', $files['thumb']['data']);
+        }
         json_out(['ok' => true]);
     }
 

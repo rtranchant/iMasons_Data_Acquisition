@@ -22,6 +22,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         $eventId = (int) $inst['event_id'];
     }
     $back = $inst ? 'admin.php?instance=' . $inst['id'] : ($eventId ? 'admin.php?event=' . $eventId : 'admin.php');
+    event_bump($eventId);   // phones and the screen see the change on their next check, not after a cache expires
 
     switch ($do) {
         case 'create_event':
@@ -46,7 +47,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
         case 'delete_event':
             if (($_POST['confirm'] ?? '') === 'DELETE') {
+                $gone = q('SELECT p.id, p.pkey FROM deck_pages p JOIN decks d ON d.id = p.deck_id WHERE d.event_id = ?', [$eventId])->fetchAll();
                 q('DELETE FROM events WHERE id = ?', [$eventId]);
+                media_forget($gone);
                 flash('Event deleted with all its data.');
                 redirect('admin.php');
             }
@@ -98,7 +101,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
             redirect($back . '#ros');
 
         case 'delete_deck':
+            $gone = q('SELECT p.id, p.pkey FROM deck_pages p JOIN decks d ON d.id = p.deck_id WHERE d.id = ? AND d.event_id = ?', [(int) ($_POST['deck_id'] ?? 0), $eventId])->fetchAll();
             q('DELETE FROM decks WHERE id = ? AND event_id = ?', [(int) ($_POST['deck_id'] ?? 0), $eventId]);
+            media_forget($gone);
             flash('Slides deleted.');
             redirect($back . '#decks');
 
@@ -562,7 +567,7 @@ function render_event(int $id, ?string $msg): void
     <?php
     page_end('<script>window.CSRF = ' . json_encode(csrf_token()) . ';</script>'
         . '<script src="assets/vendor/Sortable.min.js"></script>'
-        . '<script src="assets/admin.js?v=2"></script>');
+        . '<script src="assets/admin.js?v=3"></script>');
 }
 
 function render_instance(int $id, ?string $msg): void

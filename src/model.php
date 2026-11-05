@@ -281,16 +281,31 @@ function neighbour_images(array $event, array $slides): array
 /** Rewrite slide positions to match the given order of slide ids (unknown ids are ignored). */
 function reorder_slides(int $eventId, array $orderedIds): void
 {
-    $existing = array_column(event_slides($eventId), 'id');
-    $ordered = array_values(array_intersect(array_map('intval', $orderedIds), $existing));
+    // One query to read and one to write, however many slides: the database is on another server,
+    // and one query per slide made every drag take seconds and held up the screen and the remote.
+    $current = q('SELECT id, position FROM slides WHERE event_id = ? ORDER BY position, id', [$eventId])->fetchAll(PDO::FETCH_KEY_PAIR);
+    $existing = array_map('intval', array_keys($current));
+    $ordered = array_values(array_intersect(array_unique(array_map('intval', $orderedIds)), $existing));
     // Anything not mentioned keeps its relative place at the end.
     foreach ($existing as $id) {
         if (!in_array($id, $ordered, true)) {
             $ordered[] = $id;
         }
     }
+    $changes = [];
     foreach ($ordered as $i => $id) {
-        q('UPDATE slides SET position = ? WHERE id = ? AND event_id = ?', [($i + 1) * 10, $id, $eventId]);
+        if ((int) $current[$id] !== ($i + 1) * 10) {
+            $changes[$id] = ($i + 1) * 10;
+        }
+    }
+    foreach (array_chunk($changes, 400, true) as $chunk) {
+        $params = [];
+        foreach ($chunk as $id => $pos) {
+            array_push($params, $id, $pos);
+        }
+        $params = array_merge($params, array_keys($chunk), [$eventId]);
+        q('UPDATE slides SET position = CASE id' . str_repeat(' WHEN ? THEN ?', count($chunk)) . ' END
+           WHERE id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ') AND event_id = ?', $params);
     }
 }
 
@@ -300,11 +315,17 @@ function reorder_slides(int $eventId, array $orderedIds): void
  */
 function insert_slides(int $eventId, ?int $afterSlideId, array $newSlides): array
 {
+    // All new slides in one INSERT. Each gets a temporary negative position, which is how their ids are read back.
     $ids = [];
-    foreach ($newSlides as $n) {
-        q('INSERT INTO slides (event_id, instance_id, page_id, kind, position, hidden) VALUES (?,?,?,?,0,0)',
-            [$eventId, $n['instance_id'] ?? null, $n['page_id'] ?? null, $n['kind']]);
-        $ids[] = (int) db()->lastInsertId();
+    if ($newSlides) {
+        $vals = [];
+        $params = [];
+        foreach (array_values($newSlides) as $k => $n) {
+            $vals[] = '(?,?,?,?,?,0)';
+            array_push($params, $eventId, $n['instance_id'] ?? null, $n['page_id'] ?? null, $n['kind'], -1 - $k);
+        }
+        q('INSERT INTO slides (event_id, instance_id, page_id, kind, position, hidden) VALUES ' . implode(',', $vals), $params);
+        $ids = array_map('intval', q('SELECT id FROM slides WHERE event_id = ? AND position < 0 ORDER BY position DESC', [$eventId])->fetchAll(PDO::FETCH_COLUMN));
     }
     $order = [];
     $inserted = false;
@@ -312,10 +333,8 @@ function insert_slides(int $eventId, ?int $afterSlideId, array $newSlides): arra
         $order = $ids;
         $inserted = true;
     }
-    foreach (event_slides($eventId) as $s) {
-        if (in_array($s['id'], $ids, true)) {
-            continue;
-        }
+    foreach (array_map('intval', q('SELECT id FROM slides WHERE event_id = ? AND position >= 0 ORDER BY position, id', [$eventId])->fetchAll(PDO::FETCH_COLUMN)) as $sid) {
+        $s = ['id' => $sid];
         $order[] = $s['id'];
         if (!$inserted && $afterSlideId !== null && $s['id'] === $afterSlideId) {
             $order = array_merge($order, $ids);
@@ -337,22 +356,14 @@ function set_current_slide(int $eventId, ?int $slideId): void
 /** Swap a slide with its neighbour in the run of show. */
 function move_slide(int $eventId, int $slideId, int $direction): void
 {
-    $slides = event_slides($eventId);
-    // Normalise positions so swaps are clean.
-    foreach ($slides as $i => $s) {
-        q('UPDATE slides SET position = ? WHERE id = ?', [($i + 1) * 10, $s['id']]);
+    $ids = array_map('intval', q('SELECT id FROM slides WHERE event_id = ? ORDER BY position, id', [$eventId])->fetchAll(PDO::FETCH_COLUMN));
+    $i = array_search($slideId, $ids, true);
+    $j = $i === false ? -1 : $i + $direction;
+    if ($j < 0 || $j >= count($ids)) {
+        return;
     }
-    foreach ($slides as $i => $s) {
-        if ($s['id'] === $slideId) {
-            $j = $i + $direction;
-            if ($j < 0 || $j >= count($slides)) {
-                return;
-            }
-            q('UPDATE slides SET position = ? WHERE id = ?', [($j + 1) * 10, $s['id']]);
-            q('UPDATE slides SET position = ? WHERE id = ?', [($i + 1) * 10, $slides[$j]['id']]);
-            return;
-        }
-    }
+    [$ids[$i], $ids[$j]] = [$ids[$j], $ids[$i]];
+    reorder_slides($eventId, $ids);
 }
 
 // ---------------------------------------------------------------- collateral (one per event)
@@ -363,7 +374,11 @@ function collateral_instance(array $event): ?array
     if (empty($event['collateral_on']) || empty($event['collateral_instance_id'])) {
         return null;
     }
-    return instance_by_id((int) $event['collateral_instance_id']);
+    // Asked on every phone check: shared for 5 s.
+    $r = qf_cached('coll' . (int) $event['collateral_instance_id'] . ':' . event_rev((int) $event['id']), 5, function () use ($event) {
+        return ['r' => q('SELECT * FROM instances WHERE id = ?', [(int) $event['collateral_instance_id']])->fetch() ?: null];
+    })['r'];
+    return $r ? decode_instance($r) : null;
 }
 
 /**
@@ -392,9 +407,59 @@ function set_collateral(array $event, bool $on): void
 
 // ---------------------------------------------------------------- slide decks
 
+/**
+ * Slide images are copied to public/media/ the first time they are asked for; after that the web server
+ * sends the file itself, with no PHP and no database. The random key in the name keeps the URLs unguessable.
+ */
+function media_file(int $pageId, string $key, bool $thumb): string
+{
+    return $pageId . ($thumb ? 't' : '') . '-' . $key;
+}
+
+function media_dir(): string
+{
+    return dirname(__DIR__) . '/public/media';
+}
+
+/** Write a slide image to public/media/ so the web server can send it without PHP or the database. */
+function media_write(int $pageId, string $key, bool $thumb, string $mime, string $bytes): void
+{
+    $ext = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'][$mime] ?? null;
+    $dir = media_dir();
+    if (!$ext || (!is_dir($dir) && !@mkdir($dir, 0755))) {
+        return;
+    }
+    $file = $dir . '/' . media_file($pageId, $key, $thumb) . '.' . $ext;
+    if (!is_file($file) && @file_put_contents($file . '.tmp', $bytes) !== false) {
+        @rename($file . '.tmp', $file);
+    }
+}
+
+/** Remove the disk copies of slide images that are being deleted (rows of id, pkey). */
+function media_forget(array $pages): void
+{
+    foreach ($pages as $p) {
+        foreach ([false, true] as $thumb) {
+            foreach (['jpg', 'png', 'webp'] as $ext) {
+                @unlink(media_dir() . '/' . media_file((int) $p['id'], (string) $p['pkey'], $thumb) . '.' . $ext);
+            }
+        }
+    }
+}
+
 function page_url(int $pageId, string $key, bool $thumb = false): string
 {
-    return 'media.php?p=' . $pageId . '&k=' . $key . ($thumb ? '&t=1' : '');
+    static $files = null;
+    if ($files === null) {
+        $files = [];
+        foreach ((array) @scandir(media_dir()) as $f) {
+            if (preg_match('/^(\d+t?-[a-f0-9]+)\.(jpg|png|webp)$/', (string) $f, $m)) {
+                $files[$m[1]] = $f;
+            }
+        }
+    }
+    $name = media_file($pageId, $key, $thumb);
+    return isset($files[$name]) ? 'media/' . $files[$name] : 'media.php?p=' . $pageId . '&k=' . $key . ($thumb ? '&t=1' : '');
 }
 
 function event_decks(int $eventId): array
@@ -457,6 +522,7 @@ function deck_finish(array $deck, int $batch, ?int $afterSlideId): int
                 insert_slides($eventId, $remaining ? (int) $remaining : null, $extra);
             }
         }
+        $gone = q('SELECT id, pkey FROM deck_pages WHERE deck_id = ? AND batch <> ?', [$deck['id'], $batch])->fetchAll();
         q('DELETE FROM deck_pages WHERE deck_id = ? AND batch <> ?', [$deck['id'], $batch]);
         q('UPDATE decks SET current_batch = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?', [$batch, $deck['id']]);
         db()->commit();
@@ -464,6 +530,7 @@ function deck_finish(array $deck, int $batch, ?int $afterSlideId): int
         db()->rollBack();
         throw $e;
     }
+    media_forget($gone);
     return count($pages);
 }
 
@@ -516,20 +583,32 @@ function phone_context(string $code, ?string $token): array
  */
 function m1_save_answers(int $eventId, int $instanceId, int $participantId, array $answers): int
 {
-    $n = 0;
+    // One query for the whole batch. The first answer to a statement wording counts (INSERT IGNORE).
+    $rows = [];
     foreach (array_slice($answers, 0, 100) as $a) {
         $ans = (string) ($a['answer'] ?? '');
-        if (!in_array($ans, ['yes', 'no', 'dk'], true)) {
-            continue;
+        $k = (int) ($a['statement_id'] ?? 0) . ':' . (int) ($a['version'] ?? 0);
+        if (in_array($ans, ['yes', 'no', 'dk'], true) && !isset($rows[$k])) {
+            $rows[$k] = [(int) ($a['statement_id'] ?? 0), (int) ($a['version'] ?? 0), $ans];
         }
-        $n += q("INSERT IGNORE INTO m1_answers (statement_id, version, participant_id, answer, created_at)
-                 SELECT s.id, s.version, ?, ?, UTC_TIMESTAMP()
-                 FROM m1_statements s JOIN instances i ON i.id = s.instance_id
-                 WHERE s.id = ? AND s.version = ? AND s.active = 1
-                   AND i.id = ? AND i.event_id = ? AND i.module = 'm1' AND i.is_open = 1",
-            [$participantId, $ans, (int) ($a['statement_id'] ?? 0), (int) ($a['version'] ?? 0), $instanceId, $eventId])->rowCount();
     }
-    return $n;
+    if (!$rows) {
+        return 0;
+    }
+    $sel = [];
+    $params = [];
+    foreach ($rows as [$sid, $ver, $ans]) {
+        $sel[] = 'SELECT ? AS sid, ? AS ver, ? AS ans';
+        array_push($params, $sid, $ver, $ans);
+    }
+    $params = array_merge($params, [$participantId, $instanceId, $eventId]);
+    return q("INSERT IGNORE INTO m1_answers (statement_id, version, participant_id, answer, created_at)
+              SELECT s.id, s.version, ?, x.ans, UTC_TIMESTAMP()
+              FROM (" . implode(' UNION ALL ', $sel) . ") x
+              JOIN m1_statements s ON s.id = x.sid AND s.version = x.ver AND s.active = 1
+              JOIN instances i ON i.id = s.instance_id
+              WHERE i.id = ? AND i.event_id = ? AND i.module = 'm1' AND i.is_open = 1",
+        array_merge([$participantId], array_slice($params, 0, -3), [$instanceId, $eventId]))->rowCount();
 }
 
 function touch_participant(array $p, ?int $instanceId): void
@@ -550,6 +629,16 @@ function live_slide_with_instance(array $event): ?array
     if (empty($event['current_slide_id'])) {
         return null;
     }
+    // Every phone asks this; one database read per 3 s is shared by all of them. The key holds the
+    // current slide id (read fresh on every request), so a slide change is seen at once.
+    $r = qf_cached('live' . $event['id'] . ':' . $event['current_slide_id'] . ':' . event_rev((int) $event['id']), 3, function () use ($event) {
+        return ['r' => live_slide_row($event)];
+    })['r'];
+    return $r ? decode_instance($r) : null;
+}
+
+function live_slide_row(array $event): ?array
+{
     $r = q("SELECT s.id AS slide_id, s.kind, s.hidden, i.*,
                    (SELECT c.hidden FROM slides c WHERE c.instance_id = s.instance_id AND c.kind = 'collect' LIMIT 1) AS parent_hidden
             FROM slides s LEFT JOIN instances i ON i.id = s.instance_id
@@ -558,7 +647,7 @@ function live_slide_with_instance(array $event): ?array
         return null;
     }
     unset($r['slide_id'], $r['kind'], $r['hidden'], $r['parent_hidden']);
-    return decode_instance($r);
+    return $r;
 }
 
 /**

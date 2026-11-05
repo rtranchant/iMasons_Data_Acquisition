@@ -743,7 +743,7 @@
   // Short requests only: ask, wait for the answer, then wait 5 s before asking again (never two at once).
   // Laptop key presses do not wait: they switch slides here at once and ask the server straight after.
   // Unchanged replies are tiny ({same:true}); errors make it wait longer; a hidden tab asks rarely.
-  var POLL_VISIBLE_MS = window.SCREEN_CHECK_MS || 5000, POLL_HIDDEN_MS = 10000, MAX_BACKOFF_MS = 30000;
+  var POLL_VISIBLE_MS = window.SCREEN_CHECK_MS || 5000, POLL_HIDDEN_MS = 60000, MAX_BACKOFF_MS = 30000;
   var offline = document.getElementById('offline'), lastHash = '', failures = 0, pollTimer = null, polling = false, again = false;
   var preloaded = {}, nav = [], eventName = document.title.replace(/ – Screen$/, '');
   var currentSlide = null;

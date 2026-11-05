@@ -1,0 +1,10 @@
+# Slide images copied here by the app (see page_url() in src/model.php). The random key in each
+# file name means a file never changes, so browsers may keep it for a year. No folder listings.
+Options -Indexes
+<IfModule mod_headers.c>
+  Header set Cache-Control "public, max-age=31536000, immutable"
+  Header set X-Content-Type-Options "nosniff"
+</IfModule>
+<FilesMatch "\.(php|phtml|phar|html?)$">
+  Require all denied
+</FilesMatch>

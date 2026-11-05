@@ -52,6 +52,7 @@ try {
             session_write_close();
             if ($isPost) {
                 remote_action($event, $action, $input);
+                event_bump((int) $event['id']);
                 if (!empty($_GET['lite'])) {
                     json_out(['ok' => true]); // laptop keys/clicks: the screen picks the change up itself
                 }
@@ -123,6 +124,26 @@ function handle_phone(array $event, array $p, string $action, array $input): voi
             json_out(['ok' => false, 'error' => 'validation', 'message' => $err], 422);
         }
         json_out(['ok' => true]);
+    }
+
+    // Answers saved on the phone come with its regular check (POST), grouped by module and question set.
+    if (!empty($input['answers']) && is_array($input['answers'])) {
+        $groups = [];
+        foreach (array_slice($input['answers'], 0, 100) as $item) {
+            $kind = (string) ($item['a'] ?? '');
+            $body = is_array($item['b'] ?? null) ? $item['b'] : [];
+            if ($kind === 'm1_answer' || $kind === 'qf_answer') {
+                $groups[$kind . ':' . (int) ($body['instance_id'] ?? 0)][] = $body;
+            }
+        }
+        foreach ($groups as $k => $answers) {
+            [$kind, $iid] = explode(':', $k);
+            if ($kind === 'm1_answer') {
+                m1_save_answers((int) $event['id'], (int) $iid, $pid, $answers);
+            } else {
+                qf_save_answers((int) $event['id'], (int) $iid, $pid, $answers);
+            }
+        }
     }
 
     // Read: what is live now.

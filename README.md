@@ -86,6 +86,18 @@ Server settings live in `imasons_config.php` (see `config/imasons_config.example
 
 Built for PHP 7.4+ and MariaDB 10.3+. No build step; real-time updates use polling.
 
+### Keeping the database load low
+
+The database is on another server and shared with other sites, so the app keeps connections and round trips few:
+- **Slide images** are copied to `public/media/` when uploaded (or the first time they are shown) and served as plain
+  files by the web server: no PHP, no database. `public/media/.htaccess` lets browsers keep them for a year.
+- **Reordering, moving and inserting slides** is one query to read and one to write, whatever the number of slides.
+- **Phones** send their Yes/No and quick-fire answers with their regular check (every ~10 s), all in one query, or at
+  once when the attendee leaves the page. A phone or big screen in a background tab checks once a minute.
+- **Shared answers** (what is live, the quick-fire statement list and counts, the collateral module) are read once
+  every few seconds for all phones together (file cache in the temp folder); any host action clears them at once.
+- Pages skip the migration check once the database is known to be up to date (marker file in the temp folder).
+
 ### How the devices talk to the server
 
 Shared hosting limits how many PHP requests can run **at the same time**, not how many it can serve in total.
