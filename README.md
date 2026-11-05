@@ -9,6 +9,8 @@ appear on the room's big screen, and the host runs everything from a phone remot
 |---|---|---|
 | `admin.php` | Host (password) | Create events, add modules, edit content, order the run of show, export CSV |
 | `remote.php?c=CODE` | Host (password) | Next/previous, go to page N, go live, show/hide slides, open/close, approve statements |
+
+**Staying logged in.** Logging in on a device keeps it logged in (laptop, phone remote, big screen) until you press *Log out* on that device. The login is a signed cookie, so it does not depend on the host's session files, which are deleted after a short idle time. The cookie is renewed on every visit. To log out every device at once, change `admin_password` in `imasons_config.php`.
 | `screen.php?c=CODE` | Room screen | Live slide with QR code; read-only |
 | `e.php?c=CODE` | Attendees | One link per event; follows whatever is live |
 

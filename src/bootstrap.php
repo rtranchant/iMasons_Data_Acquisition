@@ -171,13 +171,85 @@ function start_session(): void
     session_start();
 }
 
+// Admin login is a signed cookie, not a PHP session: the host deletes idle session files after
+// about 24 minutes, which logged the admin out in the middle of an event. The cookie stays valid
+// until "Log out" on that device, or until the admin password changes (that logs out every device).
+
+const AUTH_COOKIE = 'imasons_auth';
+const AUTH_DAYS = 400; // the longest browsers keep a cookie; renewed on every admin visit, so it never runs out in use
+
+function auth_key(): string
+{
+    $c = app_config();
+    return hash('sha256', 'imasons-admin|' . (string) ($c['admin_password'] ?? '') . '|' . (string) ($c['db']['password'] ?? ''));
+}
+
+function auth_set_cookie(string $value, int $expires): void
+{
+    if (headers_sent()) {
+        return;
+    }
+    setcookie(AUTH_COOKIE, $value, [
+        'expires'  => $expires,
+        'path'     => '/',
+        'secure'   => is_https(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
+/** Log this device in (after the password was checked). */
+function auth_login(): void
+{
+    $nonce = bin2hex(random_bytes(16));
+    $value = $nonce . '.' . hash_hmac('sha256', $nonce, auth_key());
+    $_COOKIE[AUTH_COOKIE] = $value;
+    $GLOBALS['__auth'] = $nonce;
+    auth_set_cookie($value, time() + AUTH_DAYS * 86400);
+}
+
+function auth_logout(): void
+{
+    unset($_COOKIE[AUTH_COOKIE]);
+    $GLOBALS['__auth'] = null;
+    auth_set_cookie('', time() - 3600);
+}
+
+/** The login nonce from a valid cookie, or null. */
+function auth_nonce(): ?string
+{
+    if (array_key_exists('__auth', $GLOBALS)) {
+        return $GLOBALS['__auth'];
+    }
+    $GLOBALS['__auth'] = null;
+    $nonce = null;
+    $c = app_config();
+    if (empty($c['admin_password'])) {
+        return null;
+    }
+    $parts = explode('.', (string) ($_COOKIE[AUTH_COOKIE] ?? ''));
+    if (count($parts) === 2 && preg_match('/^[a-f0-9]{32}$/', $parts[0])
+        && hash_equals(hash_hmac('sha256', $parts[0], auth_key()), $parts[1])) {
+        $nonce = $parts[0];
+        auth_set_cookie($parts[0] . '.' . $parts[1], time() + AUTH_DAYS * 86400); // keep it from ever running out
+    }
+    return $GLOBALS['__auth'] = $nonce;
+}
+
 function is_admin(): bool
 {
-    if (session_status() !== PHP_SESSION_ACTIVE && empty($_COOKIE['imasons_admin'])) {
-        return false; // don't hand attendees a session cookie
+    if (auth_nonce() !== null) {
+        return true;
     }
-    start_session();
-    return !empty($_SESSION['admin']);
+    // Someone logged in with the old session-based login: move them to the cookie once.
+    if (!empty($_COOKIE['imasons_admin'])) {
+        start_session();
+        if (!empty($_SESSION['admin'])) {
+            auth_login();
+            return true;
+        }
+    }
+    return false; // attendees never get a session or admin cookie
 }
 
 function require_admin(bool $json = false): void
@@ -192,8 +264,13 @@ function require_admin(bool $json = false): void
     exit;
 }
 
+/** Form/request token. Tied to the login cookie, so open pages keep working however long they stay open. */
 function csrf_token(): string
 {
+    $nonce = is_admin() ? auth_nonce() : null;
+    if ($nonce !== null) {
+        return substr(hash_hmac('sha256', 'csrf|' . $nonce, auth_key()), 0, 32);
+    }
     start_session();
     if (empty($_SESSION['csrf'])) {
         $_SESSION['csrf'] = bin2hex(random_bytes(16));

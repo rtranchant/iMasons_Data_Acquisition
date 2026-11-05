@@ -4,11 +4,13 @@ declare(strict_types=1);
 require __DIR__ . '/../src/model.php';
 require __DIR__ . '/../src/layout.php';
 
-start_session();
-
 if (isset($_GET['out'])) {
-    $_SESSION = [];
-    session_destroy();
+    auth_logout();
+    if (!empty($_COOKIE['imasons_admin'])) {
+        start_session();
+        $_SESSION = [];
+        session_destroy();
+    }
     redirect('login.php');
 }
 
@@ -24,8 +26,7 @@ if ($configured && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     // Slow down guessing a little.
     usleep(400000);
     if (hash_equals((string) app_config()['admin_password'], (string) ($_POST['password'] ?? ''))) {
-        session_regenerate_id(true);
-        $_SESSION['admin'] = true;
+        auth_login();
         migrate();
         redirect($next);
     }
